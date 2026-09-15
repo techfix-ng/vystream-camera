@@ -1,6 +1,11 @@
 #include "auth-manager.h"
 
 #include <QJsonDocument>
+#include <QDir>
+#include <QFile>
+#include <QSaveFile>
+#include <QStandardPaths>
+#include <QDebug>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -17,11 +22,17 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wincred.h>
+#include <wincrypt.h>
 #endif
 
 namespace {
 constexpr auto kApiBase = "https://vystream.techfixng.com/api/v1";
 constexpr auto kCredentialTarget = L"VYSTRM OBS Plugin Refresh Token";
+QString protectedTokenPath() {
+  const QString directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QDir().mkpath(directory);
+  return directory + "/vystrm-session.bin";
+}
 std::atomic<bool> g_authenticated{false};
 std::atomic<int> g_maxCameras{1};
 std::atomic<int> g_maxWidth{1280};
@@ -98,9 +109,9 @@ void VystrmAuthManager::postJson(
   QNetworkRequest request(QUrl(QString::fromLatin1(kApiBase) + path));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
   request.setHeader(QNetworkRequest::UserAgentHeader,
-                    "VYSTREAM-OBS-Plugin/3.0.1 (Windows; Qt)");
+                    "VYSTREAM-OBS-Plugin/3.0.2 (Windows; Qt)");
   request.setRawHeader("Accept", "application/json");
-  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.1/windows");
+  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.2/windows");
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                        QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setTransferTimeout(20000);
@@ -201,16 +212,31 @@ void VystrmAuthManager::resetPassword(const QString &token,
 }
 
 void VystrmAuthManager::restoreSession() {
+  if (busy_) {
+    QTimer::singleShot(1500, this, &VystrmAuthManager::restoreSession);
+    return;
+  }
   const QString token = storedRefreshToken();
   if (token.isEmpty()) return;
   QJsonObject request{{"refresh_token", token}, {"client", "obs-windows"}};
   postJson("/auth/refresh", QJsonDocument(request).toJson(QJsonDocument::Compact),
            [this](QNetworkReply *reply) {
     if (reply->error() != QNetworkReply::NoError) {
-      clearStoredRefreshToken();
-      fallBackToFree();
+      const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+      if (status == 401) {
+        clearStoredRefreshToken();
+        restoreAttempts_ = 0;
+        fallBackToFree();
+        return;
+      }
+      // Startup can briefly race Wi-Fi, DNS, TLS backend initialization or
+      // server security. Preserve the valid token and retry instead of
+      // turning a transient network problem into a forced login.
+      if (++restoreAttempts_ <= 6)
+        QTimer::singleShot(5000, this, &VystrmAuthManager::restoreSession);
       return;
     }
+    restoreAttempts_ = 0;
     acceptSession(reply->readAll(), true);
   });
 }
@@ -284,11 +310,28 @@ void VystrmAuthManager::fallBackToFree() {
 QString VystrmAuthManager::storedRefreshToken() const {
 #ifdef _WIN32
   PCREDENTIALW credential = nullptr;
-  if (!CredReadW(kCredentialTarget, CRED_TYPE_GENERIC, 0, &credential)) return {};
+  if (CredReadW(kCredentialTarget, CRED_TYPE_GENERIC, 0, &credential)) {
+    const QString value = QString::fromUtf8(
+        reinterpret_cast<const char *>(credential->CredentialBlob),
+        static_cast<int>(credential->CredentialBlobSize));
+    CredFree(credential);
+    if (!value.isEmpty()) return value;
+  }
+
+  QFile file(protectedTokenPath());
+  if (!file.open(QIODevice::ReadOnly)) return {};
+  const QByteArray encrypted = file.readAll();
+  if (encrypted.isEmpty()) return {};
+  DATA_BLOB input{static_cast<DWORD>(encrypted.size()),
+                  reinterpret_cast<BYTE *>(const_cast<char *>(encrypted.constData()))};
+  DATA_BLOB output{};
+  if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
+                          CRYPTPROTECT_UI_FORBIDDEN, &output))
+    return {};
   const QString value = QString::fromUtf8(
-      reinterpret_cast<const char *>(credential->CredentialBlob),
-      static_cast<int>(credential->CredentialBlobSize));
-  CredFree(credential);
+      reinterpret_cast<const char *>(output.pbData),
+      static_cast<int>(output.cbData));
+  LocalFree(output.pbData);
   return value;
 #else
   return {};
@@ -305,13 +348,31 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
   credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char *>(bytes.data()));
   credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
   credential.UserName = const_cast<LPWSTR>(L"VYSTRM");
-  CredWriteW(&credential, 0);
+  if (!CredWriteW(&credential, 0))
+    qWarning() << "VYSTREAM could not write Windows Credential Manager entry:" << GetLastError();
+
+  DATA_BLOB input{static_cast<DWORD>(bytes.size()),
+                  reinterpret_cast<BYTE *>(const_cast<char *>(bytes.constData()))};
+  DATA_BLOB output{};
+  if (CryptProtectData(&input, L"VYSTREAM OBS refresh token", nullptr, nullptr,
+                       nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output)) {
+    QSaveFile file(protectedTokenPath());
+    if (file.open(QIODevice::WriteOnly)) {
+      file.write(reinterpret_cast<const char *>(output.pbData),
+                 static_cast<qint64>(output.cbData));
+      file.commit();
+    }
+    LocalFree(output.pbData);
+  } else {
+    qWarning() << "VYSTREAM could not create DPAPI session backup:" << GetLastError();
+  }
 #endif
 }
 
 void VystrmAuthManager::clearStoredRefreshToken() {
 #ifdef _WIN32
   CredDeleteW(kCredentialTarget, CRED_TYPE_GENERIC, 0);
+  QFile::remove(protectedTokenPath());
 #endif
 }
 

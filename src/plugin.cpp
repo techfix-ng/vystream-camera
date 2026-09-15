@@ -21,6 +21,7 @@
 struct obs_module; struct obs_data; struct obs_source; struct obs_scene; struct obs_sceneitem;
 static obs_module *g_module = nullptr;
 static std::atomic<bool> g_running{false};
+static std::atomic<bool> g_shutting_down{false};
 static SOCKET g_socket = INVALID_SOCKET;
 static std::thread g_worker;
 static std::thread g_network_worker;
@@ -166,7 +167,9 @@ static int next_port() {
 
 struct SourceRequest { std::string scene_name,source_name;int port; };
 static void create_source(void *param) {
-  SourceRequest req=*static_cast<SourceRequest*>(param); delete static_cast<SourceRequest*>(param); HMODULE obs=obs_handle(), front=GetModuleHandleW(L"obs-frontend-api.dll");
+  SourceRequest req=*static_cast<SourceRequest*>(param); delete static_cast<SourceRequest*>(param);
+  if (g_shutting_down) return;
+  HMODULE obs=obs_handle(), front=GetModuleHandleW(L"obs-frontend-api.dll");
   using DC=obs_data*(*)(); using DS=void(*)(obs_data*,const char*,const char*); using DB=void(*)(obs_data*,const char*,bool); using DR=void(*)(obs_data*);
   using SC=obs_source*(*)(const char*,const char*,obs_data*,obs_data*); using SBN=obs_source*(*)(const char*); using SR=void(*)(obs_source*); using SFS=obs_scene*(*)(const obs_source*); using SA=obs_sceneitem*(*)(obs_scene*,obs_source*); using SF=obs_sceneitem*(*)(obs_scene*,const char*); using SNC=obs_scene*(*)(const char*); using SNR=void(*)(obs_scene*);
   auto dc=symbol<DC>(obs,"obs_data_create"); auto ds=symbol<DS>(obs,"obs_data_set_string"); auto db=symbol<DB>(obs,"obs_data_set_bool"); auto dr=symbol<DR>(obs,"obs_data_release"); auto sc=symbol<SC>(obs,"obs_source_create"); auto sbn=symbol<SBN>(obs,"obs_get_source_by_name"); auto sr=symbol<SR>(obs,"obs_source_release"); auto sfs=symbol<SFS>(obs,"obs_scene_from_source"); auto sa=symbol<SA>(obs,"obs_scene_add"); auto sf=symbol<SF>(obs,"obs_scene_find_source"); auto snc=symbol<SNC>(obs,"obs_scene_create"); auto snr=symbol<SNR>(obs,"obs_scene_release");
@@ -174,9 +177,15 @@ static void create_source(void *param) {
   const std::string &scene_name=req.scene_name,&source_name=req.source_name;
   obs_source *scene_source=sbn(scene_name.c_str()); obs_scene *scene=scene_source?sfs(scene_source):snc(scene_name.c_str()); if(!scene){if(scene_source)sr(scene_source);return;}
   obs_source *phone=sbn(source_name.c_str()); if(!phone){char input[256]{};std::snprintf(input,sizeof(input),"srt://0.0.0.0:%d?mode=listener&latency=200000",req.port);obs_data *d=dc();db(d,"is_local_file",false);ds(d,"input",input);ds(d,"input_format","mpegts");db(d,"restart_on_activate",true);db(d,"close_when_inactive",false);phone=sc("ffmpeg_source",source_name.c_str(),d,nullptr);dr(d);}
-  if(phone&&(!sf||!sf(scene,source_name.c_str())))sa(scene,phone);if(phone)sr(phone);if(scene_source)sr(scene_source);else snr(scene);using Save=void(*)();if(auto save=symbol<Save>(front,"obs_frontend_save"))save();
+  if(phone&&(!sf||!sf(scene,source_name.c_str())))sa(scene,phone);if(phone)sr(phone);if(scene_source)sr(scene_source);else snr(scene);
 }
-static void queue_source(const std::string&scene,const std::string&source,int port){using Q=void(*)(int,void(*)(void*),void*,bool);if(auto q=symbol<Q>(obs_handle(),"obs_queue_task"))q(0,create_source,new SourceRequest{scene,source,port},false);}
+static void queue_source(const std::string&scene,const std::string&source,int port){
+  if (g_shutting_down) return;
+  // OBS source/scene objects are reference-counted and their public APIs are
+  // thread-safe. Create them synchronously here so no plugin callback remains
+  // queued in OBS after the DLL begins unloading.
+  create_source(new SourceRequest{scene,source,port});
+}
 static void restore_saved_sources(){char sections[8192]{};GetPrivateProfileSectionNamesA(sections,sizeof(sections),ini_path().c_str());for(const char*s=sections;*s;s+=std::strlen(s)+1){if(std::strcmp(s,"__vystrm_desktop__")==0)continue;std::string scene=read_value(s,"scene_name"),source=read_value(s,"source_name");int port=GetPrivateProfileIntA(s,"port",0,ini_path().c_str());if(!scene.empty()&&!source.empty()&&port>=9000)queue_source(scene,source,port);}}
 
 static void send_tally_states(){
@@ -187,7 +196,7 @@ static void send_tally_states(){
   std::lock_guard<std::mutex> lock(g_talkback_mutex);
   for(size_t i=0;i<g_talkback_targets.size();++i){const auto&t=g_talkback_targets[i];int state=(program&&(!t.scene.empty()&&!_stricmp(program,t.scene.c_str())||!_stricmp(program,t.name.c_str())))?1:((prev&&(!t.scene.empty()&&!_stricmp(prev,t.scene.c_str())||!_stricmp(prev,t.name.c_str())))?2:0);std::string packet="VYSTALLY1|"+t.token+"|"+std::to_string(state);sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(static_cast<u_short>(t.port));if(InetPtonA(AF_INET,t.ip.c_str(),&to.sin_addr)==1)sendto(g_socket,packet.data(),static_cast<int>(packet.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to));}
 }
-static void CALLBACK obs_frontend_event(int event, void*){(void)event;send_tally_states();}
+static void CALLBACK obs_frontend_event(int event, void*){(void)event;if(!g_shutting_down)send_tally_states();}
 
 extern "C" const char *vystrm_pairing_payload(void){std::string ip=cached_wifi_ip();if(ip.empty()){g_pairing_payload.clear();return "";}g_pairing_payload="vys://p?i="+ip+"&p=9000&t="+desktop_token()+"&n="+clean("VYSTRM-"+computer_name());return g_pairing_payload.c_str();}
 extern "C" int vystrm_camera_count(void){std::lock_guard<std::mutex>lock(g_talkback_mutex);return static_cast<int>(g_talkback_targets.size());}
@@ -222,7 +231,7 @@ static void register_tools_menu(void*){
   HMODULE front=GetModuleHandleW(L"obs-frontend-api.dll");if(!front)front=LoadLibraryW(L"obs-frontend-api.dll");using Add=void(*)(const char*,void(*)(void*),void*);if(auto add=symbol<Add>(front,"obs_frontend_add_tools_menu_item")){add("VYSTREAM Camera Pairing",show_pairing,nullptr);add("VYSTREAM Director Talkback",show_talkback,nullptr);write_load_status("Tools menu registered");}else{g_menu_registered=false;write_load_status("ERROR: obs_frontend_add_tools_menu_item was not found");}
 #endif
 }
-static void queue_menu_registration(){using Q=void(*)(int,void(*)(void*),void*,bool);if(auto q=symbol<Q>(obs_handle(),"obs_queue_task"))q(0,register_tools_menu,nullptr,false);else register_tools_menu(nullptr);}
+static void queue_menu_registration(){if(!g_shutting_down)register_tools_menu(nullptr);}
 
 static void discovery_loop() {
   char b[1024]{};
@@ -275,11 +284,16 @@ extern "C" __declspec(dllexport) uint32_t obs_module_ver(){return LIBOBS_API_VER
 extern "C" __declspec(dllexport) const char *obs_module_name(){return "VYSTREAM Camera 3.0.0";}
 extern "C" __declspec(dllexport) const char *obs_module_description(){return "VYSTREAM Camera authentication, subscription entitlements, discovery, permanent OBS sources, QR pairing, and Director Talkback.";}
 extern "C" __declspec(dllexport) const char *obs_module_author(){return "TechFixNG";}
-extern "C" __declspec(dllexport) bool obs_module_load(){write_load_status("VYSTREAM 3.0.0 module entered obs_module_load on OBS 32");register_tools_menu(nullptr);queue_menu_registration();restore_saved_sources();WSADATA d{};if(WSAStartup(MAKEWORD(2,2),&d)){write_load_status("ERROR: WSAStartup failed");return true;}g_socket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(g_socket==INVALID_SOCKET){write_load_status("ERROR: discovery socket creation failed");return true;}BOOL reuse=TRUE;DWORD timeout=500;setsockopt(g_socket,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&reuse),sizeof(reuse));setsockopt(g_socket,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&timeout),sizeof(timeout));sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(INADDR_ANY);a.sin_port=htons(45990);if(bind(g_socket,reinterpret_cast<const sockaddr*>(&a),sizeof(a))==SOCKET_ERROR){char error[128]{};std::snprintf(error,sizeof(error),"ERROR: UDP 45990 bind failed with Winsock code %d",WSAGetLastError());write_load_status(error);closesocket(g_socket);g_socket=INVALID_SOCKET;return true;}write_load_status("UDP 45990 discovery listener started");g_running=true;start_return_listener();g_network_worker=std::thread(network_monitor_loop);g_worker=std::thread(discovery_loop);return true;}
+extern "C" __declspec(dllexport) bool obs_module_load(){g_shutting_down=false;write_load_status("VYSTREAM 3.0.0 module entered obs_module_load on OBS 32");register_tools_menu(nullptr);restore_saved_sources();WSADATA d{};if(WSAStartup(MAKEWORD(2,2),&d)){write_load_status("ERROR: WSAStartup failed");return true;}g_socket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(g_socket==INVALID_SOCKET){write_load_status("ERROR: discovery socket creation failed");return true;}BOOL reuse=TRUE;DWORD timeout=500;setsockopt(g_socket,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&reuse),sizeof(reuse));setsockopt(g_socket,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&timeout),sizeof(timeout));sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(INADDR_ANY);a.sin_port=htons(45990);if(bind(g_socket,reinterpret_cast<const sockaddr*>(&a),sizeof(a))==SOCKET_ERROR){char error[128]{};std::snprintf(error,sizeof(error),"ERROR: UDP 45990 bind failed with Winsock code %d",WSAGetLastError());write_load_status(error);closesocket(g_socket);g_socket=INVALID_SOCKET;return true;}write_load_status("UDP 45990 discovery listener started");g_running=true;start_return_listener();g_network_worker=std::thread(network_monitor_loop);g_worker=std::thread(discovery_loop);return true;}
 extern "C" __declspec(dllexport) void obs_module_unload(){
+// Stop all plugin activity before unregistering callbacks or returning control
+// to OBS shutdown. This prevents worker threads from touching scene/source
+// objects while libobs is destroying its deferred-release queue.
+g_shutting_down=true;
+stop_ptt();g_running=false;if(g_socket!=INVALID_SOCKET){closesocket(g_socket);g_socket=INVALID_SOCKET;}if(g_worker.joinable())g_worker.join();if(g_network_worker.joinable())g_network_worker.join();stop_return_listener();
 #ifdef VYSTRM_QT_DOCK
 vystrm_unregister_dock();
 if (HMODULE front = GetModuleHandleW(L"obs-frontend-api.dll")) { using Remove = void(*)(void(*)(int,void*),void*); if (auto remove = symbol<Remove>(front,"obs_frontend_remove_event_callback")) remove(obs_frontend_event,nullptr); }
 #endif
-stop_ptt();g_running=false;if(g_socket!=INVALID_SOCKET){closesocket(g_socket);g_socket=INVALID_SOCKET;}if(g_worker.joinable())g_worker.join();if(g_network_worker.joinable())g_network_worker.join();stop_return_listener();WSACleanup();}
+WSACleanup();}
 BOOL WINAPI DllMain(HINSTANCE,DWORD,LPVOID){return TRUE;}

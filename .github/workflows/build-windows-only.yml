@@ -6,6 +6,7 @@ on:
       - windows-v2.9.4-only
       - windows-auth-v3.0.0
       - fix/windows-auth-service-errors
+      - fix/windows-obs-shutdown-crash
   workflow_dispatch:
 
 permissions:

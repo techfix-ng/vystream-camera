@@ -39,6 +39,45 @@ void publish(const VystrmEntitlements &value, bool authenticated) {
   std::lock_guard<std::mutex> lock(g_planMutex);
   g_plan = value.plan.toStdString();
 }
+
+QString networkErrorMessage(QNetworkReply *reply, const QString &fallback) {
+  const int status =
+      reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+  const QByteArray payload = reply->readAll();
+  const QJsonDocument document = QJsonDocument::fromJson(payload);
+  QString detail;
+  if (document.isObject()) {
+    const QJsonObject object = document.object();
+    detail = object.value("error").toString();
+    if (detail.isEmpty())
+      detail = object.value("message").toString();
+  }
+
+  if (status == 401)
+    return QStringLiteral("Incorrect email address or password.");
+  if (status == 403)
+    return QStringLiteral(
+        "The VYSTREAM request was blocked by the server security service "
+        "(HTTP 403). Allow the /api/v1 endpoint in Imunify360, then try again.");
+  if (status == 409)
+    return QStringLiteral("An account already exists for this email.");
+  if (status == 422)
+    return detail.isEmpty()
+               ? QStringLiteral("Check the submitted information and try again.")
+               : QStringLiteral("VYSTREAM rejected the request: %1").arg(detail);
+  if (status == 429)
+    return QStringLiteral(
+        "Too many login attempts. Wait 15 minutes before trying again.");
+  if (status > 0)
+    return detail.isEmpty()
+               ? QStringLiteral("VYSTREAM API returned HTTP %1.").arg(status)
+               : QStringLiteral("VYSTREAM API returned HTTP %1: %2")
+                     .arg(status)
+                     .arg(detail.left(160));
+
+  return QStringLiteral("Secure connection failed: %1")
+      .arg(reply->errorString().isEmpty() ? fallback : reply->errorString());
+}
 }
 
 VystrmAuthManager::VystrmAuthManager(QObject *parent)
@@ -58,8 +97,13 @@ void VystrmAuthManager::postJson(
     const std::function<void(QNetworkReply *)> &handler) {
   QNetworkRequest request(QUrl(QString::fromLatin1(kApiBase) + path));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  request.setHeader(QNetworkRequest::UserAgentHeader,
+                    "VYSTREAM-OBS-Plugin/3.0.1 (Windows; Qt)");
   request.setRawHeader("Accept", "application/json");
-  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.0/windows");
+  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.1/windows");
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                       QNetworkRequest::NoLessSafeRedirectPolicy);
+  request.setTransferTimeout(20000);
   if (!accessToken_.isEmpty())
     request.setRawHeader("Authorization", "Bearer " + accessToken_.toUtf8());
 
@@ -87,9 +131,8 @@ void VystrmAuthManager::signIn(const QString &email, const QString &password,
   postJson("/auth/login", QJsonDocument(request).toJson(QJsonDocument::Compact),
            [this, remember](QNetworkReply *reply) {
     if (reply->error() != QNetworkReply::NoError) {
-      emit errorOccurred(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 401
-                             ? "Incorrect email address or password."
-                             : "Unable to contact the VYSTREAM service.");
+      emit errorOccurred(
+          networkErrorMessage(reply, QStringLiteral("Login request failed.")));
       return;
     }
     acceptSession(reply->readAll(), remember);
@@ -113,22 +156,9 @@ void VystrmAuthManager::registerAccount(
                       {"client", "obs-windows"}};
   postJson("/auth/register", QJsonDocument(request).toJson(QJsonDocument::Compact),
            [this, remember](QNetworkReply *reply) {
-    const int status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (reply->error() != QNetworkReply::NoError) {
-      if (status == 409) {
-        emit errorOccurred("An account already exists for this email.");
-      } else if (status == 422) {
-        emit errorOccurred("Check your name, email and password, then try again.");
-      } else if (status > 0) {
-        const QByteArray responseBody = reply->readAll();
-        emit errorOccurred(QString("VYSTREAM API returned HTTP %1: %2")
-            .arg(status)
-            .arg(QString::fromUtf8(responseBody.left(180))));
-      } else {
-        emit errorOccurred(QString("Secure connection failed: %1")
-            .arg(reply->errorString()));
-      }
+      emit errorOccurred(networkErrorMessage(
+          reply, QStringLiteral("Account creation request failed.")));
       return;
     }
     acceptSession(reply->readAll(), remember);

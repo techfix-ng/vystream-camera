@@ -5,6 +5,7 @@ on:
     branches:
       - windows-v2.9.4-only
       - windows-auth-v3.0.0
+      - fix/windows-auth-service-errors
   workflow_dispatch:
 
 permissions:
@@ -31,6 +32,37 @@ jobs:
           target: x64
           config: RelWithDebInfo
           package: 'true'
+
+      - name: Stage Qt TLS backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pluginDir = "$env:GITHUB_WORKSPACE\release\RelWithDebInfo\obs-srt-camera"
+          $tlsDir = Join-Path $pluginDir "bin\64bit\tls"
+          New-Item -ItemType Directory -Force $tlsDir | Out-Null
+
+          $roots = @("$env:GITHUB_WORKSPACE\.deps", "$env:GITHUB_WORKSPACE\build_x64", "$env:GITHUB_WORKSPACE\release")
+          $backendNames = @("qschannelbackend.dll", "qopensslbackend.dll")
+          $found = @()
+          foreach ($name in $backendNames) {
+            $match = Get-ChildItem -Path $roots -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $match) {
+              Copy-Item $match.FullName (Join-Path $tlsDir $name) -Force
+              $found += $name
+            }
+          }
+          if ($found.Count -eq 0) {
+            throw "No Qt TLS backend was found. The Windows installer cannot initialize HTTPS without qschannelbackend.dll or qopensslbackend.dll."
+          }
+          "Staged Qt TLS backend: $($found -join ', ')" | Tee-Object -FilePath "$env:GITHUB_STEP_SUMMARY"
+
+          $runtimeNames = @("libcrypto-3-x64.dll", "libssl-3-x64.dll", "libcrypto-3.dll", "libssl-3.dll", "libcrypto-1_1-x64.dll", "libssl-1_1-x64.dll")
+          foreach ($name in $runtimeNames) {
+            $match = Get-ChildItem -Path $roots -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $match) {
+              Copy-Item $match.FullName (Join-Path $pluginDir "bin\64bit\$name") -Force
+            }
+          }
 
       - name: Build VYSTREAM installer
         shell: pwsh

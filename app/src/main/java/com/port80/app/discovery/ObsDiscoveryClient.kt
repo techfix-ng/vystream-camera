@@ -19,7 +19,12 @@ data class DiscoveredObs(
     val assignedCameraName: String,
     val address: String,
     val srtPort: Int,
-    val pairingToken: String
+    val pairingToken: String,
+    /** Stable desktop identity. Unlike IP/port, this survives DHCP changes. */
+    val receiverId: String = "$address:$srtPort",
+    val platform: String = "unknown",
+    val application: String = "obs",
+    val pluginVersion: String = ""
 )
 
 /**
@@ -34,7 +39,45 @@ class ObsDiscoveryClient @Inject constructor(
     companion object {
         const val DISCOVERY_PORT = 45990
         private const val REQUEST_PREFIX = "OBS_SRT_DISCOVER_V4|"
-        private const val RESPONSE_PREFIX = "OBS_SRT_OFFER_V3|"
+        private const val RESPONSE_PREFIX_V4 = "OBS_SRT_OFFER_V4|"
+        private const val RESPONSE_PREFIX_V3 = "OBS_SRT_OFFER_V3|"
+
+        internal fun parseOffer(
+            message: String,
+            sourceAddress: String,
+            suggestedName: String
+        ): DiscoveredObs? {
+            val fields = message.split('|')
+            return when {
+                message.startsWith(RESPONSE_PREFIX_V4) && fields.size >= 10 -> {
+                    val receiverId = fields[1].takeIf { it.isNotBlank() } ?: return null
+                    val port = fields[4].toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+                    DiscoveredObs(
+                        receiverId = receiverId,
+                        name = fields[2].ifBlank { "OBS Studio" },
+                        assignedCameraName = fields[6].ifBlank { suggestedName },
+                        address = sourceAddress,
+                        srtPort = port,
+                        pairingToken = fields[5],
+                        platform = fields[7].ifBlank { "unknown" },
+                        application = fields[8].ifBlank { "obs" },
+                        pluginVersion = fields[9]
+                    )
+                }
+                message.startsWith(RESPONSE_PREFIX_V3) && fields.size >= 6 -> {
+                    val port = fields[3].toIntOrNull()?.takeIf { it in 1..65535 } ?: return null
+                    DiscoveredObs(
+                        name = fields[1].ifBlank { "OBS Studio" },
+                        assignedCameraName = fields[5].ifBlank { suggestedName },
+                        address = sourceAddress,
+                        srtPort = port,
+                        pairingToken = fields[4],
+                        receiverId = "$sourceAddress:$port"
+                    )
+                }
+                else -> null
+            }
+        }
     }
 
     private val identityPreferences by lazy {
@@ -85,18 +128,11 @@ class ObsDiscoveryClient @Inject constructor(
                         val packet = DatagramPacket(buffer, buffer.size)
                         socket.receive(packet)
                         val message = String(packet.data, 0, packet.length, Charsets.UTF_8)
-                        if (!message.startsWith(RESPONSE_PREFIX)) continue
-                        val fields = message.split('|')
-                        if (fields.size < 6) continue
-                        val port = fields[3].toIntOrNull() ?: continue
-                        val address = packet.address.hostAddress ?: fields[2]
-                        results["$address:$port"] = DiscoveredObs(
-                            name = fields[1].ifBlank { "OBS Studio" },
-                            assignedCameraName = fields[5].ifBlank { suggestedName },
-                            address = address,
-                            srtPort = port,
-                            pairingToken = fields[4]
-                        )
+                        val address = packet.address.hostAddress ?: continue
+                        val offer = parseOffer(message, address, suggestedName) ?: continue
+                        // V4 is keyed by the persistent plugin installation UUID. V3
+                        // remains keyed by IP:port so existing plugins keep working.
+                        results[offer.receiverId] = offer
                         lastResultAt = System.currentTimeMillis()
                     } catch (_: java.net.SocketTimeoutException) {
                         // Rapid retries cover normal Wi-Fi and phone-hosted hotspots.

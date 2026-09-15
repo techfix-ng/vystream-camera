@@ -72,11 +72,11 @@ jobs:
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
           $pluginDir = "$env:GITHUB_WORKSPACE\release\RelWithDebInfo\obs-srt-camera"
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\release" | Out-Null
-          & $makensis "/DPLUGIN_DIR=$pluginDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE\release" "installer\windows\VyStreamSetup.nsi"
+          & $makensis "/DPLUGIN_DIR=$pluginDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE\release" "installer\windows\VyStreamAuthSetup.nsi"
           if ($LASTEXITCODE -ne 0) { throw "NSIS failed" }
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: VYSTREAM-Windows-Setup
-          path: release/VyStream-OBS-Dock-*-Setup.exe
+          path: release/VYSTREAM-Auth-TLS-Fix-Setup.exe

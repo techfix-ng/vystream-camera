@@ -1,0 +1,17 @@
+Options -Indexes
+RewriteEngine On
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+</IfModule>
+
+<FilesMatch "^(config|config\.example)\.php$">
+  Require all denied
+</FilesMatch>

@@ -50,6 +50,7 @@ static int g_return_slot=0;
 #ifdef VYSTRM_QT_DOCK
 extern "C" void vystrm_register_dock(void);
 extern "C" void vystrm_unregister_dock(void);
+extern "C" bool vystrm_dock_choose_camera_names(const char *suggested,const char *scenes,const char *srt_sources,const char *all_sources,char *scene_out,int scene_size,char *source_out,int source_size);
 #endif
 extern "C" bool vystrm_auth_is_authenticated();
 extern "C" int vystrm_auth_max_cameras();
@@ -207,12 +208,20 @@ static LRESULT CALLBACK prompt_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
   return DefWindowProcA(w,msg,wp,lp);
 }
+static std::string join_names(const std::vector<std::string>& values){std::string joined;for(const auto& value:values){if(!joined.empty())joined+='\n';joined+=value;}return joined;}
 static bool ask_names(const std::string&id,const std::string&suggested,std::string&scene,std::string&source) {
   std::string base=suggested.empty()?"VYSTREAM Camera":suggested;Prompt p;p.id=id;p.scene_default=base+" Scene";p.source_default=base+"-Cam";p.choices=obs_name_choices();
+#ifdef VYSTRM_QT_DOCK
+  char scene_value[129]{},source_value[129]{};
+  const std::string scenes=join_names(p.choices.scenes),srt_sources=join_names(p.choices.srt_sources),all_sources=join_names(p.choices.all_sources);
+  if(!vystrm_dock_choose_camera_names(base.c_str(),scenes.c_str(),srt_sources.c_str(),all_sources.c_str(),scene_value,sizeof(scene_value),source_value,sizeof(source_value)))return false;
+  scene=clean(scene_value);source=clean(source_value);return !scene.empty()&&!source.empty();
+#else
   WNDCLASSA wc{};wc.lpfnWndProc=prompt_proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName="VystrmSceneSourcePrompt";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassA(&wc);
   HWND w=CreateWindowExA(WS_EX_TOPMOST,wc.lpszClassName,"Set up VYSTRM camera in OBS",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,478,260,nullptr,nullptr,wc.hInstance,&p);if(!w)return false;
   RECT r{}; GetWindowRect(w,&r); SetWindowPos(w,HWND_TOPMOST,(GetSystemMetrics(SM_CXSCREEN)-(r.right-r.left))/2,(GetSystemMetrics(SM_CYSCREEN)-(r.bottom-r.top))/2,0,0,SWP_NOSIZE|SWP_SHOWWINDOW);
   MSG m{};while(GetMessageA(&m,nullptr,0,0)>0){if(!IsDialogMessageA(w,&m)){TranslateMessage(&m);DispatchMessageA(&m);}}if(!p.accepted)return false;scene=p.scene_result;source=p.source_result;return true;
+#endif
 }
 static int next_port() {
   int high=8999; char sections[8192]{}; GetPrivateProfileSectionNamesA(sections,sizeof(sections),ini_path().c_str());

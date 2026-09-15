@@ -1,0 +1,15 @@
+<RCC>
+  <qresource prefix="/vystrm">
+    <file>vystrm_camera_icon.png</file>
+    <file>eye-open.svg</file>
+    <file>eye-closed.svg</file>
+    <file>google.svg</file>
+    <file>apple.svg</file>
+    <file>mail.svg</file>
+    <file>lock.svg</file>
+    <file>video.svg</file>
+    <file>broadcast.svg</file>
+    <file>users.svg</file>
+    <file>waves.svg</file>
+  </qresource>
+</RCC>

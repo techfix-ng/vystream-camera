@@ -1,0 +1,49 @@
+name: Build VYSTREAM Windows EXE
+
+on:
+  push:
+    branches:
+      - windows-v2.9.4-only
+      - windows-auth-v3.0.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build plugin
+        uses: ./.github/actions/build-plugin
+        with:
+          target: x64
+          config: RelWithDebInfo
+
+      - name: Package plugin
+        uses: ./.github/actions/package-plugin
+        with:
+          target: x64
+          config: RelWithDebInfo
+          package: 'true'
+
+      - name: Build VYSTREAM installer
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          $pluginDir = "$env:GITHUB_WORKSPACE\release\RelWithDebInfo\obs-srt-camera"
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\release" | Out-Null
+          & $makensis "/DPLUGIN_DIR=$pluginDir" "/DOUTPUT_DIR=$env:GITHUB_WORKSPACE\release" "installer\windows\VyStreamSetup.nsi"
+          if ($LASTEXITCODE -ne 0) { throw "NSIS failed" }
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: VYSTREAM-Windows-Setup
+          path: release/VyStream-OBS-Dock-*-Setup.exe

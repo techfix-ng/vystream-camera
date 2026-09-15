@@ -1,0 +1,44 @@
+name: Validate VYSTRM Auth Backend
+
+on:
+  push:
+    branches:
+      - windows-auth-v3.0.0
+    paths:
+      - 'server/**'
+      - '.github/workflows/validate-auth-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: test-root-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PHP syntax
+        run: |
+          php -l server/api/index.php
+          php -l server/api/config.example.php
+      - name: Import database schema
+        env:
+          MYSQL_PWD: test-root-password
+        run: mysql --protocol=TCP -h 127.0.0.1 -u root < server/database/schema.sql
+      - name: Verify free-plan limits
+        env:
+          MYSQL_PWD: test-root-password
+        run: |
+          test "$(mysql --batch --skip-column-names --protocol=TCP -h 127.0.0.1 -u root vystrm -e "SELECT CONCAT(max_cameras,':',max_width,'x',max_height) FROM plans WHERE code='free'")" = "1:1280x720"

@@ -1,0 +1,39 @@
+name: Package VYSTREAM Backend
+
+on:
+  push:
+    branches:
+      - windows-auth-v3.0.0
+    paths:
+      - 'server/**'
+      - '.github/workflows/package-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PHP
+        run: |
+          php -l server/api/index.php
+          php -l server/api/config.example.php
+      - name: Check deployed API
+        run: curl --fail --show-error --silent https://vystream.techfixng.com/api/v1/health
+      - name: Build backend ZIP
+        run: |
+          mkdir -p release/VYSTREAM-Backend
+          cp -R server/api release/VYSTREAM-Backend/
+          cp -R server/database release/VYSTREAM-Backend/
+          cp server/README.md release/VYSTREAM-Backend/README.md
+          cd release
+          zip -r VYSTREAM-Backend-v3.0.0.zip VYSTREAM-Backend
+      - name: Upload backend ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: VYSTREAM-Backend-v3.0.0
+          path: release/VYSTREAM-Backend-v3.0.0.zip
+          if-no-files-found: error

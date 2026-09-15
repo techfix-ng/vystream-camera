@@ -123,6 +123,16 @@ static void write_load_status(const char *message) {
 }
 static std::string read_value(const std::string &id, const char *key) { char v[256]{}; GetPrivateProfileStringA(id.c_str(), key, "", v, sizeof(v), ini_path().c_str()); return v; }
 static std::string desktop_token(){std::string value=read_value("__vystrm_desktop__","token");if(value.empty()){value=token();WritePrivateProfileStringA("__vystrm_desktop__","token",value.c_str(),ini_path().c_str());}return value;}
+static std::string installation_id(){
+  std::string value=read_value("__vystrm_desktop__","installation_id");
+  if(!value.empty())return value;
+  std::string raw=token()+token();
+  if(raw.size()!=32)return {};
+  raw[12]='4';raw[16]='8';
+  value=raw.substr(0,8)+"-"+raw.substr(8,4)+"-"+raw.substr(12,4)+"-"+raw.substr(16,4)+"-"+raw.substr(20,12);
+  WritePrivateProfileStringA("__vystrm_desktop__","installation_id",value.c_str(),ini_path().c_str());
+  return value;
+}
 static bool unique_value(const char *key,const std::string &name, const std::string &id) {
   char sections[8192]{}; GetPrivateProfileSectionNamesA(sections, sizeof(sections), ini_path().c_str());
   for (const char *s = sections; *s; s += std::strlen(s) + 1) { if (id == s) continue; char v[256]{}; GetPrivateProfileStringA(s, key, "", v, sizeof(v), ini_path().c_str()); if (_stricmp(v, name.c_str()) == 0) return false; }
@@ -273,7 +283,7 @@ static void discovery_loop() {
     if(f[0]=="OBS_SRT_DISCOVER_V4"){char phone_ip[INET_ADDRSTRLEN]{};InetNtopA(AF_INET,&sender.sin_addr,phone_ip,sizeof(phone_ip));int talkback_port=f.size()>3?std::atoi(f[3].c_str()):46010;if(talkback_port<1024||talkback_port>65535)talkback_port=46010;std::lock_guard<std::mutex>lock(g_talkback_mutex);auto it=std::find_if(g_talkback_targets.begin(),g_talkback_targets.end(),[&](const TalkbackTarget&t){return t.id==id;});TalkbackTarget target{id,source,scene,phone_ip,pairing,talkback_port};if(it==g_talkback_targets.end()){g_talkback_targets.push_back(target);g_camera_health.emplace_back();}else *it=target;}
     // 0.0.0.0 remains the correct listener bind address inside OBS. The offer
     // always advertises the routable adapter address selected for this phone.
-    std::string offer="OBS_SRT_OFFER_V3|"+computer_name()+"|"+ip+"|"+ps+"|"+pairing+"|"+clean(source);sendto(g_socket,offer.c_str(),static_cast<int>(offer.size()),0,reinterpret_cast<const sockaddr*>(&sender),z);std::string entitlement="VYSENTITLE1|"+pairing+"|"+clean(vystrm_auth_plan())+"|"+std::to_string(std::max(1,vystrm_auth_max_cameras()))+"|"+std::to_string(std::max(1,vystrm_auth_max_width()))+"|"+std::to_string(std::max(1,vystrm_auth_max_height()))+"|"+std::to_string(vystrm_auth_valid_until());sendto(g_socket,entitlement.c_str(),static_cast<int>(entitlement.size()),0,reinterpret_cast<const sockaddr*>(&sender),z);queue_source(scene,source,port);
+    std::string offer="OBS_SRT_OFFER_V4|"+installation_id()+"|"+computer_name()+"|"+ip+"|"+ps+"|"+pairing+"|"+clean(source)+"|windows|obs|3.0.0";sendto(g_socket,offer.c_str(),static_cast<int>(offer.size()),0,reinterpret_cast<const sockaddr*>(&sender),z);std::string entitlement="VYSENTITLE1|"+pairing+"|"+clean(vystrm_auth_plan())+"|"+std::to_string(std::max(1,vystrm_auth_max_cameras()))+"|"+std::to_string(std::max(1,vystrm_auth_max_width()))+"|"+std::to_string(std::max(1,vystrm_auth_max_height()))+"|"+std::to_string(vystrm_auth_valid_until());sendto(g_socket,entitlement.c_str(),static_cast<int>(entitlement.size()),0,reinterpret_cast<const sockaddr*>(&sender),z);queue_source(scene,source,port);
   }
 }
 

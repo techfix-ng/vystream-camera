@@ -139,25 +139,68 @@ static bool unique_value(const char *key,const std::string &name, const std::str
   return true;
 }
 
-struct Prompt { std::string id,scene_default,source_default,scene_result,source_result;HWND scene_edit=nullptr,source_edit=nullptr;bool accepted=false; };
+struct ObsNameChoices {
+  std::vector<std::string> scenes;
+  std::vector<std::string> srt_sources;
+  std::vector<std::string> all_sources;
+};
+static bool contains_name(const std::vector<std::string>& names,const std::string& value){
+  return std::any_of(names.begin(),names.end(),[&](const std::string& item){return _stricmp(item.c_str(),value.c_str())==0;});
+}
+static bool collect_scene_name(void* data,obs_source* source){
+  auto* choices=static_cast<ObsNameChoices*>(data);using Name=const char*(*)(const obs_source*);
+  auto name=symbol<Name>(obs_handle(),"obs_source_get_name");const char* value=name?name(source):nullptr;
+  if(value&&*value&&!contains_name(choices->scenes,value))choices->scenes.emplace_back(value);return true;
+}
+static bool collect_source_name(void* data,obs_source* source){
+  auto* choices=static_cast<ObsNameChoices*>(data);
+  using Name=const char*(*)(const obs_source*);using Id=const char*(*)(const obs_source*);
+  using Settings=obs_data*(*)(obs_source*);using GetString=const char*(*)(const obs_data*,const char*);using Release=void(*)(obs_data*);
+  HMODULE obs=obs_handle();auto name=symbol<Name>(obs,"obs_source_get_name");auto id=symbol<Id>(obs,"obs_source_get_id");
+  const char* value=name?name(source):nullptr;if(!value||!*value)return true;
+  if(!contains_name(choices->all_sources,value))choices->all_sources.emplace_back(value);
+  const char* source_id=id?id(source):nullptr;if(!source_id||_stricmp(source_id,"ffmpeg_source")!=0)return true;
+  auto settings=symbol<Settings>(obs,"obs_source_get_settings");auto get=symbol<GetString>(obs,"obs_data_get_string");auto release=symbol<Release>(obs,"obs_data_release");
+  obs_data* data_settings=settings?settings(source):nullptr;const char* input=(data_settings&&get)?get(data_settings,"input"):nullptr;
+  const bool is_srt=input&&_strnicmp(input,"srt://",6)==0;if(data_settings&&release)release(data_settings);
+  if(is_srt&&!contains_name(choices->srt_sources,value))choices->srt_sources.emplace_back(value);return true;
+}
+static ObsNameChoices obs_name_choices(){
+  ObsNameChoices choices;HMODULE obs=obs_handle();using Enum=void(*)(bool(*)(void*,obs_source*),void*);
+  if(auto scenes=symbol<Enum>(obs,"obs_enum_scenes"))scenes(collect_scene_name,&choices);
+  if(auto sources=symbol<Enum>(obs,"obs_enum_sources"))sources(collect_source_name,&choices);
+  std::sort(choices.scenes.begin(),choices.scenes.end());std::sort(choices.srt_sources.begin(),choices.srt_sources.end());
+  return choices;
+}
+struct Prompt {
+  std::string id,scene_default,source_default,scene_result,source_result;
+  ObsNameChoices choices;HWND scene_edit=nullptr,source_edit=nullptr;bool accepted=false;
+};
+static void populate_combo(HWND combo,const std::vector<std::string>& values,const std::string& fallback){
+  for(const auto& value:values)SendMessageA(combo,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(value.c_str()));
+  SetWindowTextA(combo,fallback.c_str());
+}
 static LRESULT CALLBACK prompt_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   auto *p = reinterpret_cast<Prompt *>(GetWindowLongPtrA(w, GWLP_USERDATA));
   if (msg == WM_CREATE) {
     p = reinterpret_cast<Prompt *>(reinterpret_cast<CREATESTRUCTA *>(lp)->lpCreateParams); SetWindowLongPtrA(w, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(p));
-    CreateWindowA("STATIC","A new VYSTRM camera was detected. Choose permanent OBS names:",WS_CHILD|WS_VISIBLE,18,16,444,25,w,nullptr,nullptr,nullptr);
-    CreateWindowA("STATIC","Scene name",WS_CHILD|WS_VISIBLE,18,52,110,22,w,nullptr,nullptr,nullptr);
-    p->scene_edit=CreateWindowExA(WS_EX_CLIENTEDGE,"EDIT",p->scene_default.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL,132,48,310,28,w,reinterpret_cast<HMENU>(1001),nullptr,nullptr);
-    CreateWindowA("STATIC","Source name",WS_CHILD|WS_VISIBLE,18,91,110,22,w,nullptr,nullptr,nullptr);
-    p->source_edit=CreateWindowExA(WS_EX_CLIENTEDGE,"EDIT",p->source_default.c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL,132,87,310,28,w,reinterpret_cast<HMENU>(1002),nullptr,nullptr);
-    CreateWindowA("STATIC","The source will be added only inside the new scene.",WS_CHILD|WS_VISIBLE,18,128,424,22,w,nullptr,nullptr,nullptr);
-    CreateWindowA("BUTTON","Create scene and source",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON,250,158,192,34,w,reinterpret_cast<HMENU>(IDOK),nullptr,nullptr);
-    SetFocus(p->scene_edit);SendMessageA(p->scene_edit,EM_SETSEL,0,-1);return 0;
+    CreateWindowA("STATIC","Choose an existing OBS scene/source or type a new name:",WS_CHILD|WS_VISIBLE,18,16,444,25,w,nullptr,nullptr,nullptr);
+    CreateWindowA("STATIC","Scene",WS_CHILD|WS_VISIBLE,18,52,110,22,w,nullptr,nullptr,nullptr);
+    p->scene_edit=CreateWindowExA(WS_EX_CLIENTEDGE,"COMBOBOX","",WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|CBS_DROPDOWN|CBS_AUTOHSCROLL,132,48,310,240,w,reinterpret_cast<HMENU>(1001),nullptr,nullptr);
+    populate_combo(p->scene_edit,p->choices.scenes,p->scene_default);
+    CreateWindowA("STATIC","SRT source",WS_CHILD|WS_VISIBLE,18,91,110,22,w,nullptr,nullptr,nullptr);
+    p->source_edit=CreateWindowExA(WS_EX_CLIENTEDGE,"COMBOBOX","",WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|CBS_DROPDOWN|CBS_AUTOHSCROLL,132,87,310,240,w,reinterpret_cast<HMENU>(1002),nullptr,nullptr);
+    populate_combo(p->source_edit,p->choices.srt_sources,p->source_default);
+    const char* help=p->choices.srt_sources.empty()?"No existing SRT source found. Keep or type a new source name.":"Existing SRT sources are listed. You can also type a new source name.";
+    CreateWindowA("STATIC",help,WS_CHILD|WS_VISIBLE,18,128,424,35,w,nullptr,nullptr,nullptr);
+    CreateWindowA("BUTTON","Use selection / create missing",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON,220,170,222,34,w,reinterpret_cast<HMENU>(IDOK),nullptr,nullptr);
+    SetFocus(p->scene_edit);return 0;
   }
   if (msg == WM_COMMAND && LOWORD(wp) == IDOK && p) {
     char sv[129]{},cv[129]{};GetWindowTextA(p->scene_edit,sv,sizeof(sv));GetWindowTextA(p->source_edit,cv,sizeof(cv));std::string scene=clean(sv),source=clean(cv);
-    if(scene.empty()||source.empty())MessageBoxA(w,"Enter both a scene name and a source name.","Names required",MB_OK|MB_ICONWARNING);
+    if(scene.empty()||source.empty())MessageBoxA(w,"Select an existing item or enter a new name in both fields.","Names required",MB_OK|MB_ICONWARNING);
     else if(_stricmp(scene.c_str(),source.c_str())==0)MessageBoxA(w,"Scene and source names must be different.","Names must differ",MB_OK|MB_ICONWARNING);
-    else if(!unique_value("scene_name",scene,p->id)||!unique_value("source_name",source,p->id))MessageBoxA(w,"That scene or source name is already assigned to another camera.","Name already used",MB_OK|MB_ICONWARNING);
+    else if(contains_name(p->choices.all_sources,source)&&!contains_name(p->choices.srt_sources,source))MessageBoxA(w,"That name belongs to a non-SRT OBS source. Select an SRT source or enter a different new name.","SRT source required",MB_OK|MB_ICONWARNING);
     else{p->scene_result=scene;p->source_result=source;p->accepted=true;DestroyWindow(w);}return 0;
   }
   if (msg == WM_CLOSE) { DestroyWindow(w); return 0; }
@@ -165,8 +208,9 @@ static LRESULT CALLBACK prompt_proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
   return DefWindowProcA(w,msg,wp,lp);
 }
 static bool ask_names(const std::string&id,const std::string&suggested,std::string&scene,std::string&source) {
-  std::string base=suggested.empty()?"VYSTREAM Camera":suggested;Prompt p{id,base+" Scene",base+"-Cam"};WNDCLASSA c{};c.lpfnWndProc=prompt_proc;c.hInstance=GetModuleHandleW(nullptr);c.lpszClassName="VystrmSceneSourcePrompt";c.hCursor=LoadCursor(nullptr,IDC_ARROW);c.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassA(&c);
-  HWND w=CreateWindowExA(WS_EX_TOPMOST,c.lpszClassName,"Set up VYSTRM camera in OBS",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,478,245,nullptr,nullptr,c.hInstance,&p);if(!w)return false;
+  std::string base=suggested.empty()?"VYSTREAM Camera":suggested;Prompt p;p.id=id;p.scene_default=base+" Scene";p.source_default=base+"-Cam";p.choices=obs_name_choices();
+  WNDCLASSA wc{};wc.lpfnWndProc=prompt_proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName="VystrmSceneSourcePrompt";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassA(&wc);
+  HWND w=CreateWindowExA(WS_EX_TOPMOST,wc.lpszClassName,"Set up VYSTRM camera in OBS",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,478,260,nullptr,nullptr,wc.hInstance,&p);if(!w)return false;
   RECT r{}; GetWindowRect(w,&r); SetWindowPos(w,HWND_TOPMOST,(GetSystemMetrics(SM_CXSCREEN)-(r.right-r.left))/2,(GetSystemMetrics(SM_CYSCREEN)-(r.bottom-r.top))/2,0,0,SWP_NOSIZE|SWP_SHOWWINDOW);
   MSG m{};while(GetMessageA(&m,nullptr,0,0)>0){if(!IsDialogMessageA(w,&m)){TranslateMessage(&m);DispatchMessageA(&m);}}if(!p.accepted)return false;scene=p.scene_result;source=p.source_result;return true;
 }

@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <obs-module.h>
+#include <obs-frontend-api.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <shlobj.h>

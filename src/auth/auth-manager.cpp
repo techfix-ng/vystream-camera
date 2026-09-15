@@ -6,6 +6,8 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QDateTime>
+#include <QTextStream>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -28,10 +30,28 @@
 namespace {
 constexpr auto kApiBase = "https://vystream.techfixng.com/api/v1";
 constexpr auto kCredentialTarget = L"VYSTRM OBS Plugin Refresh Token";
-QString protectedTokenPath() {
-  const QString directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+QString sessionDirectory() {
+  // Use OBS's stable plugin configuration directory. QStandardPaths::AppDataLocation
+  // depends on the host application's runtime identity and may differ between
+  // OBS launches or packaging variants.
+  QString root = qEnvironmentVariable("APPDATA");
+  if (root.isEmpty())
+    root = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+  const QString directory =
+      QDir::cleanPath(root + "/obs-studio/plugin_config/obs-srt-camera");
   QDir().mkpath(directory);
-  return directory + "/vystrm-session.bin";
+  return directory;
+}
+QString protectedTokenPath() {
+  return sessionDirectory() + "/vystrm-session.bin";
+}
+void authLog(const QString &message) {
+  QFile file(sessionDirectory() + "/auth-status.log");
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    return;
+  QTextStream stream(&file);
+  stream << QDateTime::currentDateTime().toString(Qt::ISODate)
+         << "  " << message << "\n";
 }
 std::atomic<bool> g_authenticated{false};
 std::atomic<int> g_maxCameras{1};
@@ -109,9 +129,9 @@ void VystrmAuthManager::postJson(
   QNetworkRequest request(QUrl(QString::fromLatin1(kApiBase) + path));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
   request.setHeader(QNetworkRequest::UserAgentHeader,
-                    "VYSTREAM-OBS-Plugin/3.0.2 (Windows; Qt)");
+                    "VYSTREAM-OBS-Plugin/3.0.4 (Windows; Qt)");
   request.setRawHeader("Accept", "application/json");
-  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.2/windows");
+  request.setRawHeader("X-VYSTRM-Client", "obs-plugin/3.0.4/windows");
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                        QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setTransferTimeout(20000);
@@ -217,13 +237,27 @@ void VystrmAuthManager::restoreSession() {
     return;
   }
   const QString token = storedRefreshToken();
-  if (token.isEmpty()) return;
+  if (token.isEmpty()) {
+    authLog("No saved refresh token was found.");
+    return;
+  }
+  authLog("Saved refresh token found; requesting a new session.");
   QJsonObject request{{"refresh_token", token}, {"client", "obs-windows"}};
   postJson("/auth/refresh", QJsonDocument(request).toJson(QJsonDocument::Compact),
            [this](QNetworkReply *reply) {
     if (reply->error() != QNetworkReply::NoError) {
       const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
       if (status == 401) {
+        authLog(QString("Session refresh returned HTTP 401 (attempt %1 of 3).")
+                    .arg(restoreAttempts_ + 1));
+        // A startup request can reach the server while a previous refresh
+        // rotation is still settling. Never erase the only durable token on
+        // the first rejection.
+        if (++restoreAttempts_ < 3) {
+          QTimer::singleShot(3000, this, &VystrmAuthManager::restoreSession);
+          return;
+        }
+        authLog("Saved session was rejected three times; clearing it.");
         clearStoredRefreshToken();
         restoreAttempts_ = 0;
         fallBackToFree();
@@ -232,11 +266,14 @@ void VystrmAuthManager::restoreSession() {
       // Startup can briefly race Wi-Fi, DNS, TLS backend initialization or
       // server security. Preserve the valid token and retry instead of
       // turning a transient network problem into a forced login.
+      authLog(QString("Session refresh failed (HTTP %1, network error %2).")
+                  .arg(status).arg(static_cast<int>(reply->error())));
       if (++restoreAttempts_ <= 6)
         QTimer::singleShot(5000, this, &VystrmAuthManager::restoreSession);
       return;
     }
     restoreAttempts_ = 0;
+    authLog("Session refresh succeeded.");
     acceptSession(reply->readAll(), true);
   });
 }
@@ -315,23 +352,34 @@ QString VystrmAuthManager::storedRefreshToken() const {
         reinterpret_cast<const char *>(credential->CredentialBlob),
         static_cast<int>(credential->CredentialBlobSize));
     CredFree(credential);
-    if (!value.isEmpty()) return value;
+    if (!value.isEmpty()) {
+      authLog("Loaded refresh token from Windows Credential Manager.");
+      return value;
+    }
   }
 
   QFile file(protectedTokenPath());
-  if (!file.open(QIODevice::ReadOnly)) return {};
+  if (!file.open(QIODevice::ReadOnly)) {
+    authLog("Encrypted session backup was not present.");
+    return {};
+  }
   const QByteArray encrypted = file.readAll();
   if (encrypted.isEmpty()) return {};
   DATA_BLOB input{static_cast<DWORD>(encrypted.size()),
                   reinterpret_cast<BYTE *>(const_cast<char *>(encrypted.constData()))};
   DATA_BLOB output{};
   if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
-                          CRYPTPROTECT_UI_FORBIDDEN, &output))
+                          CRYPTPROTECT_UI_FORBIDDEN, &output)) {
+    authLog(QString("Could not decrypt session backup (Windows error %1).")
+                .arg(GetLastError()));
     return {};
+  }
   const QString value = QString::fromUtf8(
       reinterpret_cast<const char *>(output.pbData),
       static_cast<int>(output.cbData));
   LocalFree(output.pbData);
+  if (!value.isEmpty())
+    authLog("Loaded refresh token from encrypted OBS plugin backup.");
   return value;
 #else
   return {};
@@ -348,8 +396,14 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
   credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char *>(bytes.data()));
   credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
   credential.UserName = const_cast<LPWSTR>(L"VYSTRM");
-  if (!CredWriteW(&credential, 0))
-    qWarning() << "VYSTREAM could not write Windows Credential Manager entry:" << GetLastError();
+  const bool credentialSaved = CredWriteW(&credential, 0);
+  if (!credentialSaved) {
+    const DWORD error = GetLastError();
+    qWarning() << "VYSTREAM could not write Windows Credential Manager entry:" << error;
+    authLog(QString("Credential Manager write failed (Windows error %1).").arg(error));
+  } else {
+    authLog("Refresh token saved to Windows Credential Manager.");
+  }
 
   DATA_BLOB input{static_cast<DWORD>(bytes.size()),
                   reinterpret_cast<BYTE *>(const_cast<char *>(bytes.constData()))};
@@ -360,11 +414,18 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
     if (file.open(QIODevice::WriteOnly)) {
       file.write(reinterpret_cast<const char *>(output.pbData),
                  static_cast<qint64>(output.cbData));
-      file.commit();
+      if (file.commit())
+        authLog("Encrypted refresh-token backup saved to the OBS plugin directory.");
+      else
+        authLog("Encrypted refresh-token backup could not be committed.");
+    } else {
+      authLog("Encrypted refresh-token backup file could not be opened for writing.");
     }
     LocalFree(output.pbData);
   } else {
-    qWarning() << "VYSTREAM could not create DPAPI session backup:" << GetLastError();
+    const DWORD error = GetLastError();
+    qWarning() << "VYSTREAM could not create DPAPI session backup:" << error;
+    authLog(QString("DPAPI encryption failed (Windows error %1).").arg(error));
   }
 #endif
 }

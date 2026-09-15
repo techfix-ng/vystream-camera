@@ -11,6 +11,11 @@
 #include <QSlider>
 #include <QStackedWidget>
 #include <QInputDialog>
+#include <QEventLoop>
+#include <QMetaObject>
+#include <QThread>
+#include <QStringList>
+#include <cstdio>
 #include <QLineEdit>
 #include <QTabWidget>
 #include <QTimer>
@@ -75,10 +80,14 @@ protected:
   bool talking = false;
 };
 
+class VyStreamDock;
+static VyStreamDock *g_vystrm_dock = nullptr;
+
 class VyStreamDock final : public QWidget {
   Q_OBJECT
 public:
   VyStreamDock() {
+    g_vystrm_dock = this;
     setObjectName("VyStreamCameraDock");
     setMinimumWidth(260);
     setStyleSheet(R"CSS(
@@ -98,7 +107,7 @@ public:
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0,0,0,0);
     outer->addWidget(stack);
-    auto *root = new QVBoxLayout(dashboard); root->setContentsMargins(10,10,10,10); root->setSpacing(8);
+    auto *root = new QVBoxLayout(dashboard); rootLayout=root; root->setContentsMargins(10,10,10,10); root->setSpacing(8);
     auto *brandRow = new QHBoxLayout;
     auto *logo = new QLabel; logo->setPixmap(QPixmap(":/vystrm/vystrm_camera_icon.png").scaled(44,44,Qt::KeepAspectRatio,Qt::SmoothTransformation));
     auto *brand = new QLabel("<span style='color:#19b9ff'>VYS</span><span style='color:#f7f9ff'>TREA</span><span style='color:#ff8a00'>M</span>");
@@ -154,6 +163,34 @@ public:
     refresh();
     auth->restoreSession();
   }
+  ~VyStreamDock() override { if(g_vystrm_dock==this)g_vystrm_dock=nullptr; }
+
+  bool chooseCameraNames(const QString &suggested,const QStringList &sceneNames,const QStringList &srtSourceNames,const QStringList &allSourceNames,QString &sceneResult,QString &sourceResult) {
+    if(!rootLayout||setupActive)return false;setupActive=true;
+    auto *card=new QFrame(this);card->setObjectName("setupCard");card->setStyleSheet("#setupCard{background:#20242c;border:1px solid #1769e0;border-radius:12px;padding:8px;}");
+    auto *layout=new QVBoxLayout(card);auto *title=new QLabel(QString("SET UP NEW CAMERA · %1").arg(suggested));title->setStyleSheet("font-weight:800;color:#19b9ff;");layout->addWidget(title);
+    auto *hint=new QLabel("Use an existing OBS scene and SRT source, or type a new name.");hint->setWordWrap(true);layout->addWidget(hint);
+    layout->addWidget(new QLabel("Scene"));
+    auto *sceneBox=new QComboBox;sceneBox->setEditable(true);sceneBox->addItems(sceneNames);sceneBox->setEditText(suggested+" Scene");layout->addWidget(sceneBox);
+    layout->addWidget(new QLabel("SRT source"));
+    auto *sourceBox=new QComboBox;sourceBox->setEditable(true);sourceBox->addItems(srtSourceNames);sourceBox->setEditText(suggested+"-Cam");layout->addWidget(sourceBox);
+    auto *sourceHint=new QLabel(srtSourceNames.isEmpty()?"No existing SRT source found. Enter a new source name.":"Choose an existing SRT source or enter a new source name.");sourceHint->setWordWrap(true);sourceHint->setStyleSheet("color:#9fb1c8;");layout->addWidget(sourceHint);
+    auto *error=new QLabel;error->setWordWrap(true);error->setStyleSheet("color:#ff6b6b;font-weight:700;");layout->addWidget(error);
+    auto *buttons=new QHBoxLayout;auto *cancel=new QPushButton("CANCEL");cancel->setObjectName("listen");auto *apply=new QPushButton("USE SELECTION / CREATE MISSING");buttons->addWidget(cancel);buttons->addWidget(apply);layout->addLayout(buttons);
+    rootLayout->insertWidget(3,card);
+    QEventLoop loop;bool accepted=false;
+    connect(cancel,&QPushButton::clicked,&loop,&QEventLoop::quit);
+    connect(apply,&QPushButton::clicked,&loop,[&]{
+      const QString scene=sceneBox->currentText().trimmed(),source=sourceBox->currentText().trimmed();
+      if(scene.isEmpty()||source.isEmpty()){error->setText("Select an existing item or enter a new name in both fields.");return;}
+      if(scene.compare(source,Qt::CaseInsensitive)==0){error->setText("Scene and source names must be different.");return;}
+      const bool sourceExists=allSourceNames.contains(source,Qt::CaseInsensitive);
+      const bool existingSrt=srtSourceNames.contains(source,Qt::CaseInsensitive);
+      if(sourceExists&&!existingSrt){error->setText("That name belongs to a non-SRT source. Choose an SRT source or type a different new name.");return;}
+      sceneResult=scene;sourceResult=source;accepted=true;loop.quit();
+    });
+    loop.exec();rootLayout->removeWidget(card);delete card;setupActive=false;return accepted;
+  }
 private slots:
   void refresh() {
     const int count=vystrm_camera_count();
@@ -196,12 +233,27 @@ private:
   }
 
   QSlider *addSlider(QVBoxLayout *layout, const QString &label, int min, int max, int value, const char *control) { auto *title=new QLabel(label); layout->addWidget(title); auto *s=new QSlider(Qt::Horizontal); s->setRange(min,max); s->setValue(value); layout->addWidget(s); connect(s,&QSlider::valueChanged,this,[this,control](int v){int i=cameras->currentIndex()-1;if(i>=0)vystrm_set_camera_control(i,control,std::to_string(v).c_str());}); return s; }
+  QVBoxLayout *rootLayout{};
+  bool setupActive=false;
   VystrmAuthManager *auth{};
   QStackedWidget *stack{};
   QLabel *planBadge{};
   QLabel *qr{},*status{},*health{}; QComboBox *cameras{},*talkbackCameras{}; HoldButton *talk{}; QString pairingPayload;
   QSlider *zoom{},*exposure{},*brightness{};
 };
+
+extern "C" bool vystrm_dock_choose_camera_names(const char *suggested,const char *scenes,const char *srt_sources,const char *all_sources,char *scene_out,int scene_size,char *source_out,int source_size) {
+  if(!g_vystrm_dock||!scene_out||!source_out||scene_size<2||source_size<2)return false;
+  QString sceneResult,sourceResult;bool accepted=false;
+  const QString suggestedValue=QString::fromUtf8(suggested?suggested:"VYSTREAM Camera");
+  const QStringList sceneNames=QString::fromUtf8(scenes?scenes:"").split('\n',Qt::SkipEmptyParts);
+  const QStringList srtNames=QString::fromUtf8(srt_sources?srt_sources:"").split('\n',Qt::SkipEmptyParts);
+  const QStringList allNames=QString::fromUtf8(all_sources?all_sources:"").split('\n',Qt::SkipEmptyParts);
+  auto choose=[&]{accepted=g_vystrm_dock&&g_vystrm_dock->chooseCameraNames(suggestedValue,sceneNames,srtNames,allNames,sceneResult,sourceResult);};
+  if(QThread::currentThread()==g_vystrm_dock->thread())choose();else QMetaObject::invokeMethod(g_vystrm_dock,choose,Qt::BlockingQueuedConnection);
+  if(!accepted)return false;const QByteArray sceneUtf8=sceneResult.toUtf8(),sourceUtf8=sourceResult.toUtf8();
+  std::snprintf(scene_out,static_cast<size_t>(scene_size),"%s",sceneUtf8.constData());std::snprintf(source_out,static_cast<size_t>(source_size),"%s",sourceUtf8.constData());return true;
+}
 
 static bool vystrm_dock_registered = false;
 

@@ -59,6 +59,7 @@ private:
   VystrmEntitlements entitlements_;
   bool authenticated_ = false;
   bool busy_ = false;
+  int restoreAttempts_ = 0;
 };
 
 extern "C" {

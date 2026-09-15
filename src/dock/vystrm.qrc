@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/vystrm">
+    <file>vystrm_camera_icon.png</file>
+  </qresource>
+</RCC>

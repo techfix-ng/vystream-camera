@@ -1,0 +1,41 @@
+name: Build VyStream vMix Bridge
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "installer/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/build-windows.yml"
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Install NSIS
+        shell: powershell
+        run: choco install nsis -y --no-progress
+      - name: Build installer
+        shell: powershell
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer\VyStreamVmixBridge.nsi
+      - name: Upload setup EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: VyStream-vMix-Bridge-v1.3.5-Windows-Setup
+          path: installer/VyStream-vMix-Bridge-v1.3.5-Setup.exe
+          if-no-files-found: error
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: VyStream-vMix-Bridge-v1.3.5-Portable
+          path: build/Release/VyStream-vMix-Bridge.exe
+          if-no-files-found: error

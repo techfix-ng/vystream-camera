@@ -10,6 +10,7 @@ on:
       - feature/plugin-multi-receiver-v4
       - feature/existing-scene-source-picker
       - fix/persistent-login-session-v3.0.2
+      - fix/obs-scene-shutdown-crash-v3.0.3
   workflow_dispatch:
 
 permissions:
@@ -89,11 +90,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "session-fix-v3.0.2"
-          $asset = "$env:GITHUB_WORKSPACE\release\VYSTREAM-OBS-Plugin-Session-Fix-v3.0.2-Setup.exe"
+          $tag = "shutdown-fix-v3.0.3"
+          $asset = "$env:GITHUB_WORKSPACE\release\VYSTREAM-OBS-Plugin-Shutdown-Fix-v3.0.3-Setup.exe"
           Copy-Item "$env:GITHUB_WORKSPACE\release\VYSTREAM-Auth-TLS-Fix-Setup.exe" $asset -Force
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --prerelease --target "$env:GITHUB_SHA" --title "VYSTREAM Session Fix v3.0.2" --notes "Windows OBS plugin with persistent login restoration and embedded camera setup."
+            gh release create $tag --prerelease --target "$env:GITHUB_SHA" --title "VYSTREAM Shutdown Fix v3.0.3" --notes "Windows OBS plugin with serialized scene lifecycle, persistent login restoration, and embedded camera setup."
           }
           gh release upload $tag $asset --clobber

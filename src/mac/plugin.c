@@ -538,6 +538,59 @@ const char *vystrm_camera_health(int index)
 	snprintf(value, sizeof(value), "STATE CONNECTED\\nCAMERA %s", talkback_targets[index].name);
 	return value;
 }
+void vystrm_set_camera_control(int index, const char *control, const char *value)
+{
+	if (shutting_down || !control || index < 0 || index >= talkback_count)
+		return;
+	char packet[1024];
+	int length = snprintf(packet, sizeof(packet), "VYSCONTROL1|%s|%s|%s", talkback_targets[index].token,
+				 control, value ? value : "");
+	if (length <= 0 || length >= (int)sizeof(packet))
+		return;
+	struct sockaddr_in to = {0};
+	to.sin_family = AF_INET;
+	to.sin_port = htons(talkback_targets[index].port);
+	if (inet_pton(AF_INET, talkback_targets[index].ip, &to.sin_addr) == 1)
+		sendto(discovery_socket, packet, (size_t)length, 0, (struct sockaddr *)&to, sizeof(to));
+}
+bool vystrm_rename_camera(int index, const char *scene, const char *source)
+{
+	if (shutting_down || index < 0 || index >= talkback_count || !scene || !source ||
+	    !*scene || !*source || !strcasecmp(scene, source) || !unique_names(scene, source, talkback_targets[index].id))
+		return false;
+	Device devices[128];
+	int count = load_devices(devices, 128);
+	for (int i = count - 1; i >= 0; i--) {
+		if (strcmp(devices[i].id, talkback_targets[index].id))
+			continue;
+		Device updated = devices[i];
+		snprintf(updated.scene_name, sizeof(updated.scene_name), "%s", scene);
+		snprintf(updated.source_name, sizeof(updated.source_name), "%s", source);
+		save_device(&updated);
+		snprintf(talkback_targets[index].scene, sizeof(talkback_targets[index].scene), "%s", scene);
+		snprintf(talkback_targets[index].name, sizeof(talkback_targets[index].name), "%s", source);
+		void (*source_set_name)(obs_source_t *, const char *) = dlsym(RTLD_DEFAULT, "obs_source_set_name");
+		obs_source_t *(*source_by_name)(const char *) = dlsym(RTLD_DEFAULT, "obs_get_source_by_name");
+		void (*source_release)(obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_release");
+		if (source_set_name && source_by_name && source_release) {
+			obs_source_t *old_scene = source_by_name(devices[i].scene_name);
+			if (old_scene) {
+				source_set_name(old_scene, scene);
+				source_release(old_scene);
+			}
+			obs_source_t *old_source = source_by_name(devices[i].source_name);
+			if (old_source) {
+				source_set_name(old_source, source);
+				source_release(old_source);
+			}
+		}
+		void (*frontend_save)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_save");
+		if (frontend_save)
+			frontend_save();
+		return true;
+	}
+	return false;
+}
 void vystrm_select_camera(int index)
 {
 	talkback_selected = index;

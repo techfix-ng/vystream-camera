@@ -119,6 +119,14 @@ build() {
   log_group "Configuring ${product_name}..."
   cmake -S ${project_root} ${cmake_args}
 
+  # Xcode 26 removed the legacy AGL framework, but the OBS dependency bundle
+  # may still emit "-framework AGL" in generated project settings. Remove only
+  # that stale token before linking; all current frameworks remain unchanged.
+  while IFS= read -r stale_link_file; do
+    [[ -z ${stale_link_file} ]] && continue
+    /usr/bin/sed -i '' 's/-framework AGL//g' "${stale_link_file}"
+  done < <(/usr/bin/grep -RIl -- '-framework AGL' build_macos 2>/dev/null || true)
+
   log_group "Building ${product_name}..."
   run_xcodebuild() {
     if (( debug )) {

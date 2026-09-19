@@ -51,6 +51,28 @@ QString sessionDirectory() {
 QString protectedTokenPath() {
   return sessionDirectory() + "/vystrm-session.bin";
 }
+QString rememberedEmailPath() {
+  return sessionDirectory() + "/remembered-email.txt";
+}
+QString loadRememberedEmail() {
+  QFile file(rememberedEmailPath());
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    return {};
+  return QString::fromUtf8(file.readAll()).trimmed();
+}
+void saveRememberedEmail(const QString &email) {
+  QSaveFile file(rememberedEmailPath());
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    authLog("Remembered email file could not be opened for writing.");
+    return;
+  }
+  file.write(email.trimmed().toLower().toUtf8());
+  if (!file.commit())
+    authLog("Remembered email file could not be committed.");
+}
+void clearRememberedEmail() {
+  QFile::remove(rememberedEmailPath());
+}
 void authLog(const QString &message) {
   QFile file(sessionDirectory() + "/auth-status.log");
   if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
@@ -127,6 +149,7 @@ VystrmAuthManager::VystrmAuthManager(QObject *parent)
 
 bool VystrmAuthManager::isAuthenticated() const { return authenticated_; }
 QString VystrmAuthManager::accountEmail() const { return email_; }
+QString VystrmAuthManager::rememberedEmail() const { return loadRememberedEmail(); }
 VystrmEntitlements VystrmAuthManager::entitlements() const { return entitlements_; }
 
 void VystrmAuthManager::postJson(
@@ -284,7 +307,7 @@ void VystrmAuthManager::restoreSession() {
   });
 }
 
-void VystrmAuthManager::acceptSession(const QByteArray &payload, bool /*remember*/) {
+void VystrmAuthManager::acceptSession(const QByteArray &payload, bool remember) {
   const auto document = QJsonDocument::fromJson(payload);
   if (!document.isObject()) {
     emit errorOccurred("The VYSTREAM service returned an invalid response.");
@@ -298,10 +321,17 @@ void VystrmAuthManager::acceptSession(const QByteArray &payload, bool /*remember
     emit errorOccurred("The VYSTREAM service did not return a session.");
     return;
   }
-  // The plugin is expected to restore the account after OBS restarts. The
-  // checkbox remains part of the UI, but a successful session always persists
-  // the returned refresh token; only explicit Sign Out clears it.
-  if (!refreshToken.isEmpty()) storeRefreshToken(refreshToken);
+  // Persist only the refresh token, never the raw password. The checkbox
+  // controls whether the durable session and remembered email are retained.
+  if (remember && !refreshToken.isEmpty()) {
+    storeRefreshToken(refreshToken);
+    saveRememberedEmail(email_);
+    authLog("Remembered-session option enabled.");
+  } else if (!remember) {
+    clearStoredRefreshToken();
+    clearRememberedEmail();
+    authLog("Remembered-session option disabled; durable session cleared.");
+  }
   applyEntitlements(object.value("entitlements").toObject());
   authenticated_ = true;
   publish(entitlements_, true);
@@ -340,6 +370,7 @@ void VystrmAuthManager::applyEntitlements(const QJsonObject &object) {
 void VystrmAuthManager::signOut() {
   if (!accessToken_.isEmpty()) postJson("/auth/logout", "{}", [](QNetworkReply *) {});
   clearStoredRefreshToken();
+  clearRememberedEmail();
   accessToken_.clear();
   email_.clear();
   authenticated_ = false;

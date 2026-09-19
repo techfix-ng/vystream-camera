@@ -29,3 +29,11 @@ The runtime loader will accept UTF-8 JSON Lines records:
 A separate metadata record identifies the translation, language, version, and
 license. Canonical references remain language-neutral, so `John 3:16`,
 `Johanu 3:16`, and the localized equivalent all stage the same verse.
+
+## Manual search
+
+The Overview tab includes a manual reference search field. It accepts numeric
+references and natural forms such as `John 3:16`, `John chapter three verse
+sixteen`, `Johanu 3:16`, and `Orin Dafidi 23:1`. Search stages the verse
+only; it never changes OBS Program until the operator presses **PUSH TO
+PROGRAM**.

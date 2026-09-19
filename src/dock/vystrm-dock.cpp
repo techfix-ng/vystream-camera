@@ -175,7 +175,9 @@ public:
 
     auto *timer = new QTimer(this); connect(timer,&QTimer::timeout,this,&VyStreamDock::refresh); timer->start(750);
     refresh();
-    auth->restoreSession();
+    // Defer the first refresh until OBS has returned to its event loop. OBS
+    // owns the dock lifecycle, but it does not own plugin authentication state.
+    QTimer::singleShot(0, auth, &VystrmAuthManager::restoreSession);
   }
   ~VyStreamDock() override { if(g_vystrm_dock==this)g_vystrm_dock=nullptr; }
 

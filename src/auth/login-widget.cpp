@@ -44,7 +44,7 @@ void decoratePassword(QLineEdit *edit) {
 VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
     : QWidget(parent), auth_(auth) {
   setObjectName("VystrmLogin");
-  setMinimumWidth(260);
+  setMinimumWidth(240);
   setStyleSheet(R"CSS(
     #VystrmLogin, #loginContent, QScrollArea, QScrollArea > QWidget > QWidget,
     QStackedWidget, QWidget#authPage {
@@ -53,9 +53,9 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
     }
     QScrollBar:vertical { background:#061424; width:5px; }
     QScrollBar::handle:vertical { background:#245681; border-radius:2px; min-height:24px; }
-    QLabel#wordmark { font-size:31px; font-weight:900; letter-spacing:2px; }
+    QLabel#wordmark { font-size:26px; font-weight:900; letter-spacing:2px; }
     QLabel#tagline { color:#a9bad0; font-size:9px; letter-spacing:2px; }
-    QLabel#title { color:#fff; font-size:29px; font-weight:800; }
+    QLabel#title { color:#fff; font-size:24px; font-weight:800; }
     QLabel#subtitle { color:#aabbd2; font-size:12px; }
     QLabel#fieldLabel { color:#f4f7fc; font-size:11px; font-weight:700; }
     QLabel#error { color:#ff7582; background:rgba(90,15,26,150);
@@ -65,11 +65,11 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
     QLabel#feature { color:#eef5ff; font-size:10px; font-weight:700; }
     QLabel#footerTag { color:#9eafc6; font-size:9px; letter-spacing:2px; }
     QLineEdit { background:rgba(7,27,47,220); color:#fff; border:1px solid #2b67a0;
-      border-radius:12px; padding:13px 10px; selection-background-color:#1976ff;
-      min-height:22px; }
+      border-radius:10px; padding:8px 10px; selection-background-color:#1976ff;
+      min-height:18px; }
     QLineEdit:focus { border:1px solid #22adff; }
     QCheckBox { color:#eef4fc; font-size:11px; }
-    QPushButton { border-radius:11px; padding:11px; font-weight:700; }
+    QPushButton { border-radius:10px; padding:8px; font-weight:700; }
     QPushButton#primary { color:white; border:0; min-height:26px;
       background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
         stop:0 #10c9ee,stop:.55 #075dff,stop:1 #ff7200); }
@@ -89,8 +89,8 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   auto *content = new QWidget;
   content->setObjectName("loginContent");
   auto *layout = new QVBoxLayout(content);
-  layout->setContentsMargins(28,20,28,24);
-  layout->setSpacing(10);
+  layout->setContentsMargins(20,12,20,16);
+  layout->setSpacing(6);
 
   auto *languageRow = new QHBoxLayout;
   languageRow->addStretch();
@@ -103,7 +103,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   auto *logo = new QLabel;
   logo->setAlignment(Qt::AlignCenter);
   logo->setPixmap(QPixmap(":/vystrm/vystrm_camera_icon.png")
-      .scaled(92,92,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+      .scaled(72,72,Qt::KeepAspectRatio,Qt::SmoothTransformation));
   layout->addWidget(logo);
 
   auto *wordmark = new QLabel(
@@ -120,7 +120,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   tagline->setAlignment(Qt::AlignCenter);
   tagline->setWordWrap(true);
   layout->addWidget(tagline);
-  layout->addSpacing(16);
+  layout->addSpacing(8);
 
   auto *title = new QLabel("Welcome Back");
   title->setObjectName("title");
@@ -152,7 +152,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   loginPage->setObjectName("authPage");
   auto *loginLayout = new QVBoxLayout(loginPage);
   loginLayout->setContentsMargins(0,0,0,0);
-  loginLayout->setSpacing(9);
+  loginLayout->setSpacing(6);
   loginLayout->addWidget(fieldLabel("Email Address",loginPage));
   email_ = new QLineEdit;
   email_->setPlaceholderText("you@example.com");
@@ -165,19 +165,24 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   password_->setPlaceholderText("Enter your password");
   decoratePassword(password_);
   loginLayout->addWidget(password_);
-  auto *options = new QHBoxLayout;
+  auto *options = new QVBoxLayout;
+  options->setContentsMargins(0,0,0,0);
+  options->setSpacing(1);
   remember_ = new QCheckBox("Remember email and keep me signed in");
   remember_->setToolTip("Stores your email and a secure refresh session. Your password is never saved.");
   remember_->setChecked(!email_->text().trimmed().isEmpty());
+  options->addWidget(remember_);
+  auto *forgotRow = new QHBoxLayout;
+  forgotRow->setContentsMargins(0,0,0,0);
+  forgotRow->addStretch();
   auto *forgot = new QPushButton("Forgot password?");
   forgot->setObjectName("link");
-  options->addWidget(remember_);
-  options->addStretch();
-  options->addWidget(forgot);
+  forgotRow->addWidget(forgot);
+  options->addLayout(forgotRow);
   loginLayout->addLayout(options);
   signIn_ = new QPushButton("Sign In  →");
   signIn_->setObjectName("primary");
-  signIn_->setMinimumHeight(48);
+  signIn_->setMinimumHeight(40);
   loginLayout->addWidget(signIn_);
   auto *orLabel = new QLabel("────────  OR  ────────");
   orLabel->setAlignment(Qt::AlignCenter);
@@ -190,7 +195,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   for(auto *button:{google,apple}) {
     button->setObjectName("provider");
     button->setIconSize(QSize(21,21));
-    button->setMinimumHeight(46);
+    button->setMinimumHeight(38);
     button->setEnabled(false);
     button->setToolTip("Coming soon");
     providers->addWidget(button);
@@ -296,7 +301,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   waves->setPixmap(QPixmap(":/vystrm/waves.svg"));
   waves->setScaledContents(true);
   waves->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
-  waves->setFixedHeight(64);
+  waves->setFixedHeight(44);
   waves->setMinimumWidth(0);
   layout->addWidget(waves);
 
@@ -304,7 +309,7 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
     auto *box=new QVBoxLayout;
     auto *image=new QLabel;
     image->setAlignment(Qt::AlignCenter);
-    image->setPixmap(QPixmap(icon).scaled(38,38,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    image->setPixmap(QPixmap(icon).scaled(30,30,Qt::KeepAspectRatio,Qt::SmoothTransformation));
     auto *caption=new QLabel(text);
     caption->setObjectName("feature");
     caption->setAlignment(Qt::AlignCenter);

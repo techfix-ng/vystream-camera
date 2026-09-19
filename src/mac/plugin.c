@@ -756,6 +756,15 @@ static void *discovery_loop(void *unused)
 	return NULL;
 }
 
+static int tally_matches(const char *active, const TalkbackTarget *target)
+{
+	if (!active || !*active || !target)
+		return 0;
+	if (target->scene[0] && strcasecmp(active, target->scene) == 0)
+		return 1;
+	return target->name[0] && strcasecmp(active, target->name) == 0;
+}
+
 void vystrm_send_tally_states(void)
 {
 	if (shutting_down || !running || discovery_socket < 0)
@@ -777,15 +786,12 @@ void vystrm_send_tally_states(void)
 		source_release(preview);
 	for (int i = 0; i < talkback_count; i++) {
 		const TalkbackTarget *target = &talkback_targets[i];
-		int state = 0;
-		if (program_name[0] && ((target->scene[0] && strcasecmp(program_name, target->scene) == 0) ||
-				(!target->scene[0] && (!target->name[0] || strcasecmp(program_name, target->name) == 0))))
-			state = 1;
-		else if (preview_name[0] && ((target->scene[0] && strcasecmp(preview_name, target->scene) == 0) ||
-				(!target->scene[0] && (!target->name[0] || strcasecmp(preview_name, target->name) == 0))))
-			state = 2;
+		// The mobile receiver uses textual VYSTALLY1 states. Numeric 0/1/2
+		// packets are ignored, which previously left every camera orange.
+		const char *state = tally_matches(program_name, target) ? "LIVE" :
+			(tally_matches(preview_name, target) ? "PREVIEW" : "STANDBY");
 		char packet[256];
-		int length = snprintf(packet, sizeof(packet), "VYSTALLY1|%s|%d", target->token, state);
+		int length = snprintf(packet, sizeof(packet), "VYSTALLY1|%s|%s", target->token, state);
 		struct sockaddr_in to = {0};
 		to.sin_family = AF_INET;
 		to.sin_port = htons(target->port);

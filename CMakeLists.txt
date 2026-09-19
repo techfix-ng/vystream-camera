@@ -19,6 +19,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
   src/auth/auth-manager.h
   src/auth/login-widget.cpp
   src/auth/login-widget.h
+  src/bible/bible-assistant.cpp
+  src/bible/bible-assistant.h
   src/qr_v4.h
 )
 if(WIN32)

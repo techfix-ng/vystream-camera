@@ -1,5 +1,7 @@
-#include <obs-frontend-api.h>\n#include <obs.h>
-#include <QApplication>\n#include <QCheckBox>
+#include <obs-frontend-api.h>
+#include <obs.h>
+#include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QFrame>

@@ -33,7 +33,7 @@ static pthread_t return_worker;
 static bool return_worker_started;
 static AudioQueueRef reply_output;
 typedef struct {
-	char id[96], name[128], ip[64], token[17];
+	char id[96], name[128], scene[128], ip[64], token[17];
 	int port;
 } TalkbackTarget;
 static TalkbackTarget talkback_targets[128];
@@ -684,6 +684,8 @@ static void *discovery_loop(void *unused)
 				snprintf(talkback_targets[slot].id, sizeof(talkback_targets[slot].id), "%s", id);
 				snprintf(talkback_targets[slot].name, sizeof(talkback_targets[slot].name), "%s",
 					 d.source_name);
+				snprintf(talkback_targets[slot].scene, sizeof(talkback_targets[slot].scene), "%s",
+					 d.scene_name);
 				snprintf(talkback_targets[slot].ip, sizeof(talkback_targets[slot].ip), "%s", phone);
 				snprintf(talkback_targets[slot].token, sizeof(talkback_targets[slot].token), "%s",
 					 d.token);
@@ -723,9 +725,11 @@ void vystrm_send_tally_states(void)
 	for (int i = 0; i < talkback_count; i++) {
 		const TalkbackTarget *target = &talkback_targets[i];
 		int state = 0;
-		if (program_name[0] && ((!target->name[0] || strcasecmp(program_name, target->name) == 0)))
+		if (program_name[0] && ((target->scene[0] && strcasecmp(program_name, target->scene) == 0) ||
+				(!target->scene[0] && (!target->name[0] || strcasecmp(program_name, target->name) == 0))))
 			state = 1;
-		else if (preview_name[0] && ((!target->name[0] || strcasecmp(preview_name, target->name) == 0)))
+		else if (preview_name[0] && ((target->scene[0] && strcasecmp(preview_name, target->scene) == 0) ||
+				(!target->scene[0] && (!target->name[0] || strcasecmp(preview_name, target->name) == 0))))
 			state = 2;
 		char packet[256];
 		int length = snprintf(packet, sizeof(packet), "VYSTALLY1|%s|%d", target->token, state);
@@ -748,11 +752,11 @@ __attribute__((visibility("default"))) uint32_t obs_module_ver(void)
 }
 __attribute__((visibility("default"))) const char *obs_module_name(void)
 {
-	return "VyStream Camera 2.9.0";
+	return "VYSTREAM Camera 3.0.4";
 }
 __attribute__((visibility("default"))) const char *obs_module_description(void)
 {
-	return "Discovers VYSTRM Camera devices and adds SRT listener sources.";
+	return "VYSTREAM Camera authentication, subscription entitlements, persistent OBS sources, tally, and talkback.";
 }
 __attribute__((visibility("default"))) const char *obs_module_author(void)
 {

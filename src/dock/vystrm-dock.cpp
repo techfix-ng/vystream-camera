@@ -198,7 +198,7 @@ public:
     auto stageBibleQuery = [this](const QString &query) {
       const QString code = bibleTranslation->currentData().toString();
       stagedBibleVerse = bible.lookup(query, code);
-      bibleHeard->setText(QString("Heard: \\"%1\\"").arg(query.trimmed()));
+      bibleHeard->setText(QString("Heard: \"%1\"").arg(query.trimmed()));
       if (!stagedBibleVerse.referenceRecognized) {
         bibleReference->setText("Reference not recognized");
         bibleText->setText("Try a reference such as John 3:16 or Johanu 3:16.");
@@ -329,7 +329,7 @@ public:
   void handleBibleTranscript(const QString &transcript) {
     const QString code = bibleTranslation ? bibleTranslation->currentData().toString() : "kjv";
     stagedBibleVerse = bible.lookup(transcript, code);
-    if (bibleHeard) bibleHeard->setText(QString("Heard: \\"%1\\"").arg(transcript));
+    if (bibleHeard) bibleHeard->setText(QString("Heard: \"%1\"").arg(transcript));
     if (!bibleReference || !bibleText) return;
     if (!stagedBibleVerse.referenceRecognized) {
       bibleReference->setText("Reference not recognized");

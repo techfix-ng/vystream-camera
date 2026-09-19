@@ -15,3 +15,11 @@ The Android endpoint QR scanner accepts the equivalent payload:
 ```
 
 The listener shown in OBS will still read `srt://0.0.0.0:PORT?mode=listener`; this is intentional. The phone-facing address is the routable IP from the offer/QR payload.
+
+## Tally state packets
+
+After pairing, OBS sends the camera a UDP tally packet on the advertised talkback port:
+
+`VYSTALLY1|<pairing-token>|LIVE` when the camera's scene/source is in Program,
+`VYSTALLY1|<pairing-token>|PREVIEW` when it is in Preview, and
+`VYSTALLY1|<pairing-token>|STANDBY` when it is neither. The camera should only show the green live indicator for the authenticated `LIVE` state; a connected stream by itself remains orange standby.

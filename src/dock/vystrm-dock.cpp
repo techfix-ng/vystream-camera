@@ -26,7 +26,8 @@
 #include <string>
 #include "../qr_v4.h"
 #include "../auth/auth-manager.h"
-#include "../auth/login-widget.h"\n#include "../bible/bible-assistant.h"
+#include "../auth/login-widget.h"
+#include "../bible/bible-assistant.h"
 
 extern "C" {
 const char *vystrm_pairing_payload(void);
@@ -38,7 +39,8 @@ bool vystrm_rename_camera(int index, const char *scene, const char *source);
 void vystrm_select_camera(int index);
 bool vystrm_talkback_start(void);
 void vystrm_talkback_stop(void);
-void vystrm_send_tally_states(void);\n    bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text);
+void vystrm_send_tally_states(void);
+bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text);
 }
 
 class HoldButton final : public QPushButton {

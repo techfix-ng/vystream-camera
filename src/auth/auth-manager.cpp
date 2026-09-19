@@ -33,7 +33,9 @@
 
 namespace {
 constexpr auto kApiBase = "https://vystream.techfixng.com/api/v1";
+#ifdef _WIN32
 constexpr auto kCredentialTarget = L"VYSTRM OBS Plugin Refresh Token";
+#endif
 QString sessionDirectory() {
   // Use OBS's stable plugin configuration directory. QStandardPaths::AppDataLocation
   // depends on the host application's runtime identity and may differ between

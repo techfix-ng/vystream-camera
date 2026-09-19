@@ -27,6 +27,10 @@
 #include <wincrypt.h>
 #endif
 
+#ifdef __APPLE__
+#include <Security/Security.h>
+#endif
+
 namespace {
 constexpr auto kApiBase = "https://vystream.techfixng.com/api/v1";
 constexpr auto kCredentialTarget = L"VYSTRM OBS Plugin Refresh Token";
@@ -384,6 +388,33 @@ QString VystrmAuthManager::storedRefreshToken() const {
   if (!value.isEmpty())
     authLog("Loaded refresh token from encrypted OBS plugin backup.");
   return value;
+#elif defined(__APPLE__)
+  const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount,
+                        kSecReturnData, kSecMatchLimit};
+  const void *values[] = {kSecClassGenericPassword,
+                          CFSTR("VYSTRM OBS Plugin Refresh Token"),
+                          CFSTR("VYSTRM"), kCFBooleanTrue,
+                          kSecMatchLimitOne};
+  CFDictionaryRef query = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 5,
+                                              &kCFTypeDictionaryKeyCallBacks,
+                                              &kCFTypeDictionaryValueCallBacks);
+  CFTypeRef result = nullptr;
+  const OSStatus status = SecItemCopyMatching(query, &result);
+  CFRelease(query);
+  if (status != errSecSuccess || !result ||
+      CFGetTypeID(result) != CFDataGetTypeID()) {
+    if (result) CFRelease(result);
+    authLog(QString("macOS Keychain refresh token unavailable (status %1).").arg(status));
+    return {};
+  }
+  const auto *data = CFDataGetBytePtr(static_cast<CFDataRef>(result));
+  const CFIndex length = CFDataGetLength(static_cast<CFDataRef>(result));
+  const QString value = QString::fromUtf8(reinterpret_cast<const char *>(data),
+                                           static_cast<int>(length));
+  CFRelease(result);
+  if (!value.isEmpty())
+    authLog("Loaded refresh token from macOS Keychain.");
+  return value;
 #else
   return {};
 #endif
@@ -430,6 +461,32 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
     qWarning() << "VYSTREAM could not create DPAPI session backup:" << error;
     authLog(QString("DPAPI encryption failed (Windows error %1).").arg(error));
   }
+#elif defined(__APPLE__)
+  CFDataRef data = CFDataCreate(kCFAllocatorDefault,
+                                reinterpret_cast<const UInt8 *>(token.toUtf8().constData()),
+                                token.toUtf8().size());
+  const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount, kSecValueData};
+  const void *values[] = {kSecClassGenericPassword,
+                          CFSTR("VYSTRM OBS Plugin Refresh Token"),
+                          CFSTR("VYSTRM"), data};
+  CFDictionaryRef query = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 4,
+                                              &kCFTypeDictionaryKeyCallBacks,
+                                              &kCFTypeDictionaryValueCallBacks);
+  const void *lookupKeys[] = {kSecClass, kSecAttrService, kSecAttrAccount};
+  const void *lookupValues[] = {kSecClassGenericPassword,
+                                CFSTR("VYSTRM OBS Plugin Refresh Token"),
+                                CFSTR("VYSTRM")};
+  CFDictionaryRef lookup = CFDictionaryCreate(kCFAllocatorDefault, lookupKeys, lookupValues, 3,
+                                               &kCFTypeDictionaryKeyCallBacks,
+                                               &kCFTypeDictionaryValueCallBacks);
+  SecItemDelete(lookup);
+  const OSStatus status = SecItemAdd(query, nullptr);
+  CFRelease(lookup);
+  CFRelease(query);
+  CFRelease(data);
+  authLog(QString("macOS Keychain refresh token %1.").arg(
+      status == errSecSuccess ? "saved" : "could not be saved"));
+#else
 #endif
 }
 
@@ -437,6 +494,16 @@ void VystrmAuthManager::clearStoredRefreshToken() {
 #ifdef _WIN32
   CredDeleteW(kCredentialTarget, CRED_TYPE_GENERIC, 0);
   QFile::remove(protectedTokenPath());
+#elif defined(__APPLE__)
+  const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount};
+  const void *values[] = {kSecClassGenericPassword,
+                          CFSTR("VYSTRM OBS Plugin Refresh Token"),
+                          CFSTR("VYSTRM")};
+  CFDictionaryRef query = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 3,
+                                              &kCFTypeDictionaryKeyCallBacks,
+                                              &kCFTypeDictionaryValueCallBacks);
+  SecItemDelete(query);
+  CFRelease(query);
 #endif
 }
 

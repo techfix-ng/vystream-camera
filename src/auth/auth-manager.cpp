@@ -462,9 +462,10 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
     authLog(QString("DPAPI encryption failed (Windows error %1).").arg(error));
   }
 #elif defined(__APPLE__)
+  const QByteArray bytes = token.toUtf8();
   CFDataRef data = CFDataCreate(kCFAllocatorDefault,
-                                reinterpret_cast<const UInt8 *>(token.toUtf8().constData()),
-                                token.toUtf8().size());
+                                reinterpret_cast<const UInt8 *>(bytes.constData()),
+                                static_cast<CFIndex>(bytes.size()));
   const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount, kSecValueData};
   const void *values[] = {kSecClassGenericPassword,
                           CFSTR("VYSTRM OBS Plugin Refresh Token"),

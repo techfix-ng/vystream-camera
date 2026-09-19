@@ -23,6 +23,7 @@ public:
   explicit VystrmAuthManager(QObject *parent = nullptr);
   bool isAuthenticated() const;
   QString accountEmail() const;
+  QString rememberedEmail() const;
   VystrmEntitlements entitlements() const;
 
 public slots:

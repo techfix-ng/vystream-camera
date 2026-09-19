@@ -695,8 +695,8 @@ static void *discovery_loop(void *unused)
 		char host[256], ip[64], offer[1024];
 		computer_name(host, sizeof(host));
 		local_ip_for(&sender, ip, sizeof(ip));
-		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V4|%s|%s|%s|%d|%s|%s|macos|obs|3.0.4", host,
-			 host, ip, d.port, d.token, d.source_name);
+		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V4|%s|%s|%s|%d|%s|%s|macos|obs|3.0.4",
+				 desktop_token(), host, ip, d.port, d.token, d.source_name);
 		sendto(discovery_socket, offer, strlen(offer), 0, (struct sockaddr *)&sender, z);
 		queue_source(d.scene_name, d.source_name, d.port);
 	}

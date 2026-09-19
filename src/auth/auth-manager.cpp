@@ -143,6 +143,7 @@ QString networkErrorMessage(QNetworkReply *reply, const QString &fallback) {
 
 VystrmAuthManager::VystrmAuthManager(QObject *parent)
     : QObject(parent), network_(new QNetworkAccessManager(this)) {
+  authLog(QString("Auth session directory: %1").arg(sessionDirectory()));
   publish(entitlements_, false);
   auto *timer = new QTimer(this);
   connect(timer, &QTimer::timeout, this, &VystrmAuthManager::refreshEntitlements);
@@ -263,6 +264,7 @@ void VystrmAuthManager::resetPassword(const QString &token,
 }
 
 void VystrmAuthManager::restoreSession() {
+  if (authenticated_) return;
   if (busy_) {
     QTimer::singleShot(1500, this, &VystrmAuthManager::restoreSession);
     return;
@@ -328,7 +330,7 @@ void VystrmAuthManager::acceptSession(const QByteArray &payload, bool remember) 
   if (remember && !refreshToken.isEmpty()) {
     storeRefreshToken(refreshToken);
     saveRememberedEmail(email_);
-    authLog("Remembered-session option enabled.");
+    authLog(QString("Remembered-session option enabled for %1.").arg(email_));
   } else if (!remember) {
     clearStoredRefreshToken();
     clearRememberedEmail();
@@ -388,6 +390,36 @@ void VystrmAuthManager::fallBackToFree() {
 
 QString VystrmAuthManager::storedRefreshToken() const {
 #ifdef _WIN32
+  // Prefer the DPAPI backup because it is written after Credential Manager and
+  // remains available when OBS is launched with a different elevation level.
+  QFile file(protectedTokenPath());
+  if (file.open(QIODevice::ReadOnly)) {
+    const QByteArray encrypted = file.readAll();
+    if (!encrypted.isEmpty()) {
+      DATA_BLOB input{static_cast<DWORD>(encrypted.size()),
+                      reinterpret_cast<BYTE *>(const_cast<char *>(encrypted.constData()))};
+      DATA_BLOB output{};
+      if (CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
+                             CRYPTPROTECT_UI_FORBIDDEN, &output)) {
+        const QString value = QString::fromUtf8(
+            reinterpret_cast<const char *>(output.pbData),
+            static_cast<int>(output.cbData));
+        LocalFree(output.pbData);
+        if (!value.isEmpty()) {
+          authLog("Loaded refresh token from DPAPI session backup.");
+          return value;
+        }
+      } else {
+        authLog(QString("Could not decrypt session backup (Windows error %1).")
+                    .arg(GetLastError()));
+      }
+    }
+  } else {
+    authLog("Encrypted session backup was not present.");
+  }
+
+  // Credential Manager remains a second durable source for older installs or
+  // when the DPAPI file could not be written.
   PCREDENTIALW credential = nullptr;
   if (CredReadW(kCredentialTarget, CRED_TYPE_GENERIC, 0, &credential)) {
     const QString value = QString::fromUtf8(
@@ -395,67 +427,13 @@ QString VystrmAuthManager::storedRefreshToken() const {
         static_cast<int>(credential->CredentialBlobSize));
     CredFree(credential);
     if (!value.isEmpty()) {
-      authLog("Loaded refresh token from Windows Credential Manager.");
+      authLog("Loaded refresh token from Windows Credential Manager fallback.");
       return value;
     }
   }
-
-  QFile file(protectedTokenPath());
-  if (!file.open(QIODevice::ReadOnly)) {
-    authLog("Encrypted session backup was not present.");
-    return {};
-  }
-  const QByteArray encrypted = file.readAll();
-  if (encrypted.isEmpty()) return {};
-  DATA_BLOB input{static_cast<DWORD>(encrypted.size()),
-                  reinterpret_cast<BYTE *>(const_cast<char *>(encrypted.constData()))};
-  DATA_BLOB output{};
-  if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
-                          CRYPTPROTECT_UI_FORBIDDEN, &output)) {
-    authLog(QString("Could not decrypt session backup (Windows error %1).")
-                .arg(GetLastError()));
-    return {};
-  }
-  const QString value = QString::fromUtf8(
-      reinterpret_cast<const char *>(output.pbData),
-      static_cast<int>(output.cbData));
-  LocalFree(output.pbData);
-  if (!value.isEmpty())
-    authLog("Loaded refresh token from encrypted OBS plugin backup.");
-  return value;
-#elif defined(__APPLE__)
-  const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount,
-                        kSecReturnData, kSecMatchLimit};
-  const void *values[] = {kSecClassGenericPassword,
-                          CFSTR("VYSTRM OBS Plugin Refresh Token"),
-                          CFSTR("VYSTRM"), kCFBooleanTrue,
-                          kSecMatchLimitOne};
-  CFDictionaryRef query = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 5,
-                                              &kCFTypeDictionaryKeyCallBacks,
-                                              &kCFTypeDictionaryValueCallBacks);
-  CFTypeRef result = nullptr;
-  const OSStatus status = SecItemCopyMatching(query, &result);
-  CFRelease(query);
-  if (status != errSecSuccess || !result ||
-      CFGetTypeID(result) != CFDataGetTypeID()) {
-    if (result) CFRelease(result);
-    authLog(QString("macOS Keychain refresh token unavailable (status %1).").arg(status));
-    return {};
-  }
-  const auto *data = CFDataGetBytePtr(static_cast<CFDataRef>(result));
-  const CFIndex length = CFDataGetLength(static_cast<CFDataRef>(result));
-  const QString value = QString::fromUtf8(reinterpret_cast<const char *>(data),
-                                           static_cast<int>(length));
-  CFRelease(result);
-  if (!value.isEmpty())
-    authLog("Loaded refresh token from macOS Keychain.");
-  return value;
-#else
+  authLog("No Windows refresh token was available.");
   return {};
-#endif
-}
-
-void VystrmAuthManager::storeRefreshToken(const QString &token) {
+#elif defined(__APPLE__)void VystrmAuthManager::storeRefreshToken(const QString &token) {
 #ifdef _WIN32
   const QByteArray bytes = token.toUtf8();
   CREDENTIALW credential{};

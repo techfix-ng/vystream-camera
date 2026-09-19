@@ -38,6 +38,7 @@ bool vystrm_rename_camera(int index, const char *scene, const char *source);
 void vystrm_select_camera(int index);
 bool vystrm_talkback_start(void);
 void vystrm_talkback_stop(void);
+void vystrm_send_tally_states(void);
 }
 
 class HoldButton final : public QPushButton {
@@ -102,7 +103,9 @@ public:
     )CSS");
     auth = new VystrmAuthManager(this);
     stack = new QStackedWidget(this);
+#ifndef __APPLE__
     auto *login = new VystrmLoginWidget(auth, stack);
+#endif
     auto *dashboard = new QWidget(stack);
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0,0,0,0);
@@ -149,6 +152,7 @@ public:
     auto *footer = new QLabel("UDP 45990 discovery  •  46010/46011 talkback"); footer->setAlignment(Qt::AlignCenter); footer->setStyleSheet("color:#687386;font-size:9px;"); root->addWidget(footer);
     root->addStretch();
 
+#ifndef __APPLE__
     stack->addWidget(login);
     stack->addWidget(dashboard);
     stack->setCurrentWidget(login);
@@ -156,6 +160,16 @@ public:
       stack->setCurrentWidget(signedIn ? dashboard : login);
       refreshEntitlementLabel();
     });
+#else
+    // macOS receives the authentication/session backend now, but its login
+    // screen is intentionally deferred. Restore any saved session silently.
+    stack->addWidget(dashboard);
+    stack->setCurrentWidget(dashboard);
+    connect(auth, &VystrmAuthManager::authenticatedChanged, this, [this, dashboard](bool) {
+      stack->setCurrentWidget(dashboard);
+      refreshEntitlementLabel();
+    });
+#endif
     connect(auth, &VystrmAuthManager::entitlementsChanged, this, &VyStreamDock::refreshEntitlementLabel);
     connect(logout, &QPushButton::clicked, auth, &VystrmAuthManager::signOut);
 
@@ -193,6 +207,9 @@ public:
   }
 private slots:
   void refresh() {
+    // Tally reads OBS scene state and therefore must run on the dock/UI thread.
+    // Polling here keeps program/preview state live without worker-thread OBS calls.
+    vystrm_send_tally_states();
     const int count=vystrm_camera_count();
     if (count+1 != cameras->count()) {
       cameras->blockSignals(true); cameras->clear(); cameras->addItem("All connected cameras");

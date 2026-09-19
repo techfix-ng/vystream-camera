@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   macos:
@@ -51,3 +51,19 @@ jobs:
         with:
           name: VYSTREAM-OBS-Dock-macOS-Installer
           path: release/VYSTREAM-OBS-Dock-macOS-Installer.zip
+
+      - name: Publish direct-download macOS installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="session-restore-v3.0.4"
+          asset="$GITHUB_WORKSPACE/release/VYSTREAM-OBS-Dock-macOS-Installer-v3.0.4.zip"
+          cp "$GITHUB_WORKSPACE/release/VYSTREAM-OBS-Dock-macOS-Installer.zip" "$asset"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" \
+              --title "VYSTREAM Session Restore v3.0.4" \
+              --notes "VYSTREAM OBS plugin installers with persistent authentication and textual tally states."
+          fi
+          gh release upload "$tag" "$asset" --clobber

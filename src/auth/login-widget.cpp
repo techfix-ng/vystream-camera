@@ -157,6 +157,8 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   email_ = new QLineEdit;
   email_->setPlaceholderText("you@example.com");
   decorateEmail(email_);
+  // Restore only the last-used email. The password is never persisted.
+  email_->setText(auth_->rememberedEmail());
   loginLayout->addWidget(email_);
   loginLayout->addWidget(fieldLabel("Password",loginPage));
   password_ = new QLineEdit;
@@ -164,8 +166,9 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   decoratePassword(password_);
   loginLayout->addWidget(password_);
   auto *options = new QHBoxLayout;
-  remember_ = new QCheckBox("Keep me signed in");
-  remember_->setChecked(true);
+  remember_ = new QCheckBox("Remember email and keep me signed in");
+  remember_->setToolTip("Stores your email and a secure refresh session. Your password is never saved.");
+  remember_->setChecked(!email_->text().trimmed().isEmpty());
   auto *forgot = new QPushButton("Forgot password?");
   forgot->setObjectName("link");
   options->addWidget(remember_);

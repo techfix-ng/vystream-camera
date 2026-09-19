@@ -234,7 +234,10 @@ public:
     });
     connect(biblePreview, &QPushButton::clicked, this, [this] {
       if (!stagedBibleVerse.textAvailable) return;
-      bibleListenerStatus->setText(QString("● Preview staged — %1").arg(stagedBibleVerse.reference.toUpper()));
+      if (vystrm_apply_bible_to_scene(true, stagedBibleVerse.reference, stagedBibleVerse.text))
+        bibleListenerStatus->setText(QString("● Preview staged — %1").arg(stagedBibleVerse.reference.toUpper()));
+      else
+        bibleListenerStatus->setText(QString("● Staged — preview scene unavailable — %1").arg(stagedBibleVerse.reference.toUpper()));
     });
     connect(biblePush, &QPushButton::clicked, this, [this] {
       if (!stagedBibleVerse.textAvailable) return;
@@ -419,6 +422,7 @@ extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &referen
   obs_scene_t *scene = obs_scene_from_source(sceneSource);
   if (!scene) { obs_source_release(sceneSource); return false; }
   constexpr const char *sourceName = "VYSTRM Bible";
+  const QString graphicText = reference.toUpper() + "\n" + text;
 #ifdef _WIN32
   constexpr const char *sourceType = "text_gdiplus";
 #else
@@ -427,7 +431,7 @@ extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &referen
   obs_source_t *source = obs_get_source_by_name(sourceName);
   if (!source) {
     obs_data_t *settings = obs_data_create();
-    obs_data_set_string(settings, "text", text.toUtf8().constData());
+    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
     source = obs_source_create(sourceType, sourceName, settings, nullptr);
     obs_data_release(settings);
     if (!source) { obs_source_release(sceneSource); return false; }

@@ -87,6 +87,17 @@ protected:
 
 class VyStreamDock;
 static VyStreamDock *g_vystrm_dock = nullptr;
+static bool append_obs_audio_source(void *data, obs_source_t *source) {
+  auto *combo = static_cast<QComboBox *>(data);
+  const char *name = obs_source_get_name(source);
+  if (!combo || !name || !*name) return true;
+  if ((obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO) != 0 &&
+      combo->findText(QString::fromUtf8(name)) < 0) {
+    combo->addItem(QString::fromUtf8(name));
+  }
+  return true;
+}
+
 
 class VyStreamDock final : public QWidget {
   Q_OBJECT
@@ -161,6 +172,7 @@ public:
     bibleLayout->addWidget(audioLabel);
     bibleAudioSource = new QComboBox;
     bibleAudioSource->addItems({"Mic/Aux (Default)", "Desktop Audio"});
+    obs_enum_sources(append_obs_audio_source, bibleAudioSource);
     bibleLayout->addWidget(bibleAudioSource);
 
     bibleHeard = new QLabel("Heard: waiting for speech…");

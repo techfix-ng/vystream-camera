@@ -432,8 +432,39 @@ QString VystrmAuthManager::storedRefreshToken() const {
     }
   }
   authLog("No Windows refresh token was available.");
+  return {};#elif defined(__APPLE__)
+  const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount,
+                        kSecReturnData, kSecMatchLimit};
+  const void *values[] = {kSecClassGenericPassword,
+                          CFSTR("VYSTRM OBS Plugin Refresh Token"),
+                          CFSTR("VYSTRM"), kCFBooleanTrue,
+                          kSecMatchLimitOne};
+  CFDictionaryRef query = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 5,
+                                              &kCFTypeDictionaryKeyCallBacks,
+                                              &kCFTypeDictionaryValueCallBacks);
+  CFTypeRef result = nullptr;
+  const OSStatus status = SecItemCopyMatching(query, &result);
+  CFRelease(query);
+  if (status != errSecSuccess || !result ||
+      CFGetTypeID(result) != CFDataGetTypeID()) {
+    if (result) CFRelease(result);
+    authLog(QString("macOS Keychain refresh token unavailable (status %1).").arg(status));
+    return {};
+  }
+  const auto *data = CFDataGetBytePtr(static_cast<CFDataRef>(result));
+  const CFIndex length = CFDataGetLength(static_cast<CFDataRef>(result));
+  const QString value = QString::fromUtf8(reinterpret_cast<const char *>(data),
+                                           static_cast<int>(length));
+  CFRelease(result);
+  if (!value.isEmpty())
+    authLog("Loaded refresh token from macOS Keychain.");
+  return value;
+#else
   return {};
-#elif defined(__APPLE__)void VystrmAuthManager::storeRefreshToken(const QString &token) {
+#endif
+}
+
+void VystrmAuthManager::storeRefreshToken(const QString &token) {
 #ifdef _WIN32
   const QByteArray bytes = token.toUtf8();
   CREDENTIALW credential{};

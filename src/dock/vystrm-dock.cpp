@@ -438,7 +438,7 @@ extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &referen
     obs_scene_add(scene, source);
   } else {
     obs_data_t *settings = obs_source_get_settings(source);
-    obs_data_set_string(settings, "text", text.toUtf8().constData());
+    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
     obs_source_update(source, settings);
     obs_data_release(settings);
   }

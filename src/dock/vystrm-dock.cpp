@@ -241,8 +241,14 @@ public:
     connect(bibleAudioSource, &QComboBox::currentTextChanged, this, [this](const QString &source) {
       if (bibleListener->isChecked()) bibleListenerStatus->setText(QString("● Listening — %1").arg(source));
     });
-    connect(bibleTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, stageBibleQuery](int) {
+    connect(bibleTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, stageBibleQuery](int index) {
+      if (bibleSettingsTranslation && bibleSettingsTranslation->currentIndex() != index)
+        bibleSettingsTranslation->setCurrentIndex(index);
       if (!stagedBibleVerse.reference.isEmpty()) stageBibleQuery(stagedBibleVerse.reference);
+    });
+    connect(bibleSettingsTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+      if (bibleTranslation && bibleTranslation->currentIndex() != index)
+        bibleTranslation->setCurrentIndex(index);
     });
     connect(biblePreview, &QPushButton::clicked, this, [this] {
       if (!stagedBibleVerse.textAvailable) return;
@@ -283,6 +289,11 @@ public:
     talk = new HoldButton("HOLD TO TALK"); talk->setMinimumHeight(48); talkLayout->addWidget(talk);
     auto *listen = new QLabel("● CAMERA REPLY LISTENER ACTIVE"); listen->setAlignment(Qt::AlignCenter); listen->setStyleSheet("background:#202a26;color:#35d07f;border-radius:9px;padding:9px;font-weight:700;"); talkLayout->addWidget(listen); talkLayout->addStretch(); tabs->addTab(talkPage, "TALKBACK");
     auto *settings = new QWidget; auto *settingsLayout = new QVBoxLayout(settings);
+    settingsLayout->addWidget(new QLabel("BIBLE LANGUAGE / TRANSLATION"));
+    bibleSettingsTranslation = new QComboBox;
+    for (const auto &translation : bible.translations())
+      bibleSettingsTranslation->addItem(translation.label, translation.code);
+    settingsLayout->addWidget(bibleSettingsTranslation);
     settingsLayout->addWidget(new QLabel("PAIR & TRANSPORT"));
     qr = new QLabel; qr->setObjectName("card"); qr->setAlignment(Qt::AlignCenter); qr->setWordWrap(true); qr->setText("Waiting for pairing code…"); qr->setMinimumHeight(155); settingsLayout->addWidget(qr);
     settingsLayout->addWidget(new QLabel("Wi-Fi discovery: ACTIVE")); settingsLayout->addStretch(); tabs->addTab(settings, "SETTINGS");
@@ -417,7 +428,7 @@ private:
   QStackedWidget *stack{};
   QLabel *planBadge{};
   QLabel *qr{},*status{},*health{};
-  QComboBox *cameras{},*talkbackCameras{},*bibleTranslation{},*bibleAudioSource{};
+  QComboBox *cameras{},*talkbackCameras{},*bibleTranslation{},*bibleSettingsTranslation{},*bibleAudioSource{};
   QCheckBox *bibleListener{};
   QLineEdit *bibleSearch{};
   QLabel *bibleListenerStatus{},*bibleHeard{},*bibleReference{},*bibleText{},*bibleRecent{};

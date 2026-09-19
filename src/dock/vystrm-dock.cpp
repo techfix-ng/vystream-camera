@@ -246,10 +246,6 @@ public:
         bibleSettingsTranslation->setCurrentIndex(index);
       if (!stagedBibleVerse.reference.isEmpty()) stageBibleQuery(stagedBibleVerse.reference);
     });
-    connect(bibleSettingsTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
-      if (bibleTranslation && bibleTranslation->currentIndex() != index)
-        bibleTranslation->setCurrentIndex(index);
-    });
     connect(biblePreview, &QPushButton::clicked, this, [this] {
       if (!stagedBibleVerse.textAvailable) return;
       if (vystrm_apply_bible_to_scene(true, stagedBibleVerse.reference, stagedBibleVerse.text))
@@ -297,6 +293,10 @@ public:
     settingsLayout->addWidget(new QLabel("PAIR & TRANSPORT"));
     qr = new QLabel; qr->setObjectName("card"); qr->setAlignment(Qt::AlignCenter); qr->setWordWrap(true); qr->setText("Waiting for pairing code…"); qr->setMinimumHeight(155); settingsLayout->addWidget(qr);
     settingsLayout->addWidget(new QLabel("Wi-Fi discovery: ACTIVE")); settingsLayout->addStretch(); tabs->addTab(settings, "SETTINGS");
+    connect(bibleSettingsTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+      if (bibleTranslation && bibleTranslation->currentIndex() != index)
+        bibleTranslation->setCurrentIndex(index);
+    });
     auto *footer = new QLabel("UDP 45990 discovery  •  46010/46011 talkback"); footer->setAlignment(Qt::AlignCenter); footer->setStyleSheet("color:#687386;font-size:9px;"); root->addWidget(footer);
     root->addStretch();
 

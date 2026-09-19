@@ -4,8 +4,16 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-$configFile = getenv('VYSTRM_CONFIG_FILE');
+$configFile = getenv('VYSTRM_CONFIG_FILE') ?: '';
 if (!$configFile || !is_file($configFile)) {
+    // cPanel/shared-hosting deployments commonly keep config.php beside
+    // the public api/ directory. The environment variable remains preferred.
+    $candidate = dirname(__DIR__, 2) . '/config/config.php';
+    if (is_file($candidate) && is_readable($candidate)) {
+        $configFile = $candidate;
+    }
+}
+if (!$configFile || !is_file($configFile) || !is_readable($configFile)) {
     http_response_code(503);
     echo json_encode(['error' => 'service_not_configured']);
     exit;

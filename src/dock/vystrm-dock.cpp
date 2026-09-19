@@ -38,7 +38,7 @@ bool vystrm_rename_camera(int index, const char *scene, const char *source);
 void vystrm_select_camera(int index);
 bool vystrm_talkback_start(void);
 void vystrm_talkback_stop(void);
-void vystrm_send_tally_states(void);
+void vystrm_send_tally_states(void);\n    bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text);
 }
 
 class HoldButton final : public QPushButton {
@@ -214,8 +214,8 @@ public:
       }
       bibleRecent->setText("Recent: " + bibleRecentReferences.join("  •  "));
     };
-    connect(findButton, &QPushButton::clicked, this, [stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
-    connect(bibleSearch, &QLineEdit::returnPressed, this, [stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
+    connect(findButton, &QPushButton::clicked, this, [this, stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
+    connect(bibleSearch, &QLineEdit::returnPressed, this, [this, stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
     connect(bibleListener, &QCheckBox::toggled, this, [this](bool enabled) {
       const QString source = bibleAudioSource->currentText();
       bibleListenerStatus->setText(enabled ? QString("● Listening — %1").arg(source) : "● Listener Off");

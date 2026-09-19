@@ -24,6 +24,7 @@ typedef struct obs_scene obs_scene_t;
 typedef struct obs_sceneitem obs_sceneitem_t;
 static obs_module_t *module_pointer;
 static volatile bool running;
+static volatile bool shutting_down;
 static int discovery_socket = -1;
 static pthread_t worker;
 static bool worker_started;
@@ -47,6 +48,10 @@ extern "C" void vystrm_register_dock(void);
 extern void vystrm_register_dock(void);
 #endif
 #endif
+extern bool vystrm_auth_is_authenticated(void);
+extern int vystrm_auth_max_cameras(void);
+extern int vystrm_auth_max_width(void);
+extern int vystrm_auth_max_height(void);
 
 static void send_talkback(const void *bytes, size_t length)
 {
@@ -553,6 +558,8 @@ static void create_source(void *parameter)
 {
 	SourceRequest req = *(SourceRequest *)parameter;
 	free(parameter);
+	if (shutting_down)
+		return;
 	obs_data_t *(*data_create)(void) = dlsym(RTLD_DEFAULT, "obs_data_create");
 	void (*data_string)(obs_data_t *, const char *, const char *) = dlsym(RTLD_DEFAULT, "obs_data_set_string");
 	void (*data_bool)(obs_data_t *, const char *, bool) = dlsym(RTLD_DEFAULT, "obs_data_set_bool");
@@ -643,8 +650,12 @@ static void *discovery_loop(void *unused)
 			continue;
 		clean_field(id);
 		clean_field(suggested);
+		if (!vystrm_auth_is_authenticated())
+			continue;
 		Device d = {0};
 		if (!find_device(id, &d)) {
+			if (talkback_count >= vystrm_auth_max_cameras())
+				continue;
 			snprintf(d.id, sizeof(d.id), "%s", id);
 			d.port = next_port();
 			if (!ask_scene_source_names(suggested, id, d.scene_name, sizeof(d.scene_name), d.source_name,
@@ -682,12 +693,48 @@ static void *discovery_loop(void *unused)
 		char host[256], ip[64], offer[1024];
 		computer_name(host, sizeof(host));
 		local_ip_for(&sender, ip, sizeof(ip));
-		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V3|%s|%s|%d|%s|%s", host, ip, d.port, d.token,
-			 d.source_name);
+		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V4|%s|%s|%s|%d|%s|%s|macos|obs|3.0.4", host,
+			 host, ip, d.port, d.token, d.source_name);
 		sendto(discovery_socket, offer, strlen(offer), 0, (struct sockaddr *)&sender, z);
 		queue_source(d.scene_name, d.source_name, d.port);
 	}
 	return NULL;
+}
+
+void vystrm_send_tally_states(void)
+{
+	if (shutting_down || !running || discovery_socket < 0)
+		return;
+	obs_source_t *(*current_scene)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_get_current_scene");
+	obs_source_t *(*preview_scene)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_get_current_preview_scene");
+	const char *(*source_name)(const obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_get_name");
+	void (*source_release)(obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_release");
+	obs_source_t *program = current_scene ? current_scene() : NULL;
+	obs_source_t *preview = preview_scene ? preview_scene() : NULL;
+	char program_name[256] = {0}, preview_name[256] = {0};
+	if (program && source_name)
+		snprintf(program_name, sizeof(program_name), "%s", source_name(program));
+	if (preview && source_name)
+		snprintf(preview_name, sizeof(preview_name), "%s", source_name(preview));
+	if (program && source_release)
+		source_release(program);
+	if (preview && source_release)
+		source_release(preview);
+	for (int i = 0; i < talkback_count; i++) {
+		const TalkbackTarget *target = &talkback_targets[i];
+		int state = 0;
+		if (program_name[0] && ((!target->name[0] || strcasecmp(program_name, target->name) == 0)))
+			state = 1;
+		else if (preview_name[0] && ((!target->name[0] || strcasecmp(preview_name, target->name) == 0)))
+			state = 2;
+		char packet[256];
+		int length = snprintf(packet, sizeof(packet), "VYSTALLY1|%s|%d", target->token, state);
+		struct sockaddr_in to = {0};
+		to.sin_family = AF_INET;
+		to.sin_port = htons(target->port);
+		if (length > 0 && inet_pton(AF_INET, target->ip, &to.sin_addr) == 1)
+			sendto(discovery_socket, packet, (size_t)length, 0, (struct sockaddr *)&to, sizeof(to));
+	}
 }
 
 __attribute__((visibility("default"))) void obs_module_set_pointer(obs_module_t *m)
@@ -713,6 +760,7 @@ __attribute__((visibility("default"))) const char *obs_module_author(void)
 }
 __attribute__((visibility("default"))) bool obs_module_load(void)
 {
+	shutting_down = false;
 	restore_saved_sources();
 	register_talkback_menu();
 	discovery_socket = socket(AF_INET, SOCK_DGRAM, 0);
@@ -743,6 +791,7 @@ __attribute__((visibility("default"))) bool obs_module_load(void)
 }
 __attribute__((visibility("default"))) void obs_module_unload(void)
 {
+	shutting_down = true;
 	stop_talkback();
 	running = false;
 	if (discovery_socket >= 0) {

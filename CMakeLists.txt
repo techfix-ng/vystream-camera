@@ -37,7 +37,7 @@ if(APPLE)
   # OBS older macOS dependency bundle can still advertise the removed AGL
   # framework. Xcode 26 no longer ships it, so strip only that stale
   # transitive framework while retaining all current OBS/Qt frameworks.
-  foreach(_vystrm_dependency IN ITEMS OBS::libobs OBS::obs-frontend-api)
+  foreach(_vystrm_dependency IN ITEMS OBS::libobs OBS::obs-frontend-api Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
     if(TARGET ${_vystrm_dependency})
       get_target_property(_vystrm_link_libraries ${_vystrm_dependency} INTERFACE_LINK_LIBRARIES)
       if(_vystrm_link_libraries)

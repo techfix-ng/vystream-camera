@@ -1,5 +1,7 @@
 #include <obs-frontend-api.h>
+#include <obs.h>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDockWidget>
 #include <QFrame>
@@ -27,6 +29,7 @@
 #include "../qr_v4.h"
 #include "../auth/auth-manager.h"
 #include "../auth/login-widget.h"
+#include "../bible/bible-assistant.h"
 
 extern "C" {
 const char *vystrm_pairing_payload(void);
@@ -39,6 +42,7 @@ void vystrm_select_camera(int index);
 bool vystrm_talkback_start(void);
 void vystrm_talkback_stop(void);
 void vystrm_send_tally_states(void);
+bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text);
 }
 
 class HoldButton final : public QPushButton {
@@ -127,7 +131,128 @@ public:
     status = new QLabel("● Waiting for VYSTREAM cameras"); status->setStyleSheet("color:#8d97a8;padding:4px;"); root->addWidget(status);
     auto *tabs = new QTabWidget(this); tabs->setDocumentMode(true); tabs->setObjectName("sections"); root->addWidget(tabs);
     auto *overview = new QWidget; auto *overviewLayout = new QVBoxLayout(overview);
-    overviewLayout->addWidget(new QLabel("PRODUCTION OVERVIEW")); overviewLayout->addWidget(new QLabel("VYSTREAM Camera is ready for OBS.")); overviewLayout->addStretch(); tabs->addTab(overview, "OVERVIEW");
+    overviewLayout->setContentsMargins(6,6,6,6); overviewLayout->setSpacing(6);
+    auto *production = new QLabel("PRODUCTION OVERVIEW");
+    production->setStyleSheet("font-weight:800;font-size:13px;");
+    overviewLayout->addWidget(production);
+
+    auto *bibleCard = new QFrame; bibleCard->setObjectName("bibleCard");
+    bibleCard->setStyleSheet("#bibleCard{background:#20242c;border:1px solid #303642;border-radius:10px;padding:6px;}");
+    auto *bibleLayout = new QVBoxLayout(bibleCard); bibleLayout->setContentsMargins(7,7,7,7); bibleLayout->setSpacing(5);
+    auto *bibleHeader = new QHBoxLayout;
+    auto *bibleTitle = new QLabel("📖  BIBLE LIVE ASSISTANT");
+    bibleTitle->setStyleSheet("font-weight:800;color:#f5f7fb;");
+    bibleTranslation = new QComboBox; bibleTranslation->setToolTip("Bible text and translation");
+    for (const auto &translation : bible.translations())
+      bibleTranslation->addItem(translation.label, translation.code);
+    bibleHeader->addWidget(bibleTitle); bibleHeader->addStretch(); bibleHeader->addWidget(bibleTranslation);
+    bibleLayout->addLayout(bibleHeader);
+
+    auto *listenerRow = new QHBoxLayout;
+    bibleListener = new QCheckBox("Live Listener");
+    bibleListener->setToolTip("Listen to the selected OBS audio source for Bible references.");
+    bibleListenerStatus = new QLabel("● Listener Off");
+    bibleListenerStatus->setStyleSheet("color:#8d97a8;font-size:10px;");
+    listenerRow->addWidget(bibleListener); listenerRow->addStretch(); listenerRow->addWidget(bibleListenerStatus);
+    bibleLayout->addLayout(listenerRow);
+
+    auto *audioLabel = new QLabel("Audio Source");
+    audioLabel->setStyleSheet("color:#9fb1c8;font-size:10px;");
+    bibleLayout->addWidget(audioLabel);
+    bibleAudioSource = new QComboBox;
+    bibleAudioSource->addItems({"Mic/Aux (Default)", "Desktop Audio"});
+    bibleLayout->addWidget(bibleAudioSource);
+
+    bibleHeard = new QLabel("Heard: waiting for speech…");
+    bibleHeard->setWordWrap(true); bibleHeard->setStyleSheet("color:#9fb1c8;font-size:10px;");
+    bibleLayout->addWidget(bibleHeard);
+
+    bibleReference = new QLabel("No reference staged");
+    bibleReference->setStyleSheet("font-size:16px;font-weight:800;color:#fff;");
+    bibleLayout->addWidget(bibleReference);
+    bibleText = new QLabel("Detected references will appear here. Nothing is sent to Program automatically.");
+    bibleText->setWordWrap(true); bibleText->setObjectName("card");
+    bibleText->setStyleSheet("color:#d8e2f1;background:#242a34;border:1px solid #394150;border-radius:7px;padding:7px;");
+    bibleLayout->addWidget(bibleText);
+
+    auto *bibleButtons = new QHBoxLayout;
+    biblePreview = new QPushButton("PREVIEW"); biblePreview->setObjectName("listen");
+    biblePush = new QPushButton("PUSH TO PROGRAM"); biblePush->setEnabled(false);
+    bibleClear = new QPushButton("CLEAR"); bibleClear->setObjectName("listen");
+    bibleButtons->addWidget(biblePreview); bibleButtons->addWidget(biblePush); bibleButtons->addWidget(bibleClear);
+    bibleLayout->addLayout(bibleButtons);
+
+    auto *findLabel = new QLabel("Find a verse"); findLabel->setStyleSheet("color:#9fb1c8;font-size:10px;");
+    bibleLayout->addWidget(findLabel);
+    auto *findRow = new QHBoxLayout;
+    bibleSearch = new QLineEdit; bibleSearch->setPlaceholderText("John 3:16, Johanu 3:16, Romans 8:28");
+    auto *findButton = new QPushButton("→"); findButton->setMaximumWidth(36);
+    findRow->addWidget(bibleSearch); findRow->addWidget(findButton); bibleLayout->addLayout(findRow);
+
+    bibleRecent = new QLabel("Recent: —");
+    bibleRecent->setWordWrap(true); bibleRecent->setStyleSheet("color:#9fb1c8;font-size:10px;");
+    bibleLayout->addWidget(bibleRecent);
+    overviewLayout->addWidget(bibleCard);
+    auto *overviewStatus = new QLabel("Camera: Waiting  •  Talkback: Ready");
+    overviewStatus->setStyleSheet("color:#8d97a8;font-size:10px;");
+    overviewLayout->addWidget(overviewStatus);
+    overviewLayout->addStretch();
+    tabs->addTab(overview, "OVERVIEW");
+
+    auto stageBibleQuery = [this](const QString &query) {
+      const QString code = bibleTranslation->currentData().toString();
+      stagedBibleVerse = bible.lookup(query, code);
+      bibleHeard->setText(QString("Heard: \"%1\"").arg(query.trimmed()));
+      if (!stagedBibleVerse.referenceRecognized) {
+        bibleReference->setText("Reference not recognized");
+        bibleText->setText("Try a reference such as John 3:16 or Johanu 3:16.");
+        biblePush->setEnabled(false);
+        return;
+      }
+      bibleReference->setText(stagedBibleVerse.reference.toUpper() + (stagedBibleVerse.textAvailable ? "  •  READY" : "  •  PACK NEEDED"));
+      bibleText->setText(stagedBibleVerse.text);
+      biblePush->setEnabled(stagedBibleVerse.textAvailable);
+      if (!bibleRecentReferences.contains(stagedBibleVerse.reference)) {
+        bibleRecentReferences.prepend(stagedBibleVerse.reference);
+        while (bibleRecentReferences.size() > 5) bibleRecentReferences.removeLast();
+      }
+      bibleRecent->setText("Recent: " + bibleRecentReferences.join("  •  "));
+    };
+    connect(findButton, &QPushButton::clicked, this, [this, stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
+    connect(bibleSearch, &QLineEdit::returnPressed, this, [this, stageBibleQuery] { stageBibleQuery(bibleSearch->text()); });
+    connect(bibleListener, &QCheckBox::toggled, this, [this](bool enabled) {
+      const QString source = bibleAudioSource->currentText();
+      bibleListenerStatus->setText(enabled ? QString("● Listening — %1").arg(source) : "● Listener Off");
+      bibleListenerStatus->setStyleSheet(enabled ? "color:#35d07f;font-size:10px;" : "color:#8d97a8;font-size:10px;");
+      if (!enabled) bibleHeard->setText("Heard: listener stopped");
+    });
+    connect(bibleAudioSource, &QComboBox::currentTextChanged, this, [this](const QString &source) {
+      if (bibleListener->isChecked()) bibleListenerStatus->setText(QString("● Listening — %1").arg(source));
+    });
+    connect(bibleTranslation, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, stageBibleQuery](int) {
+      if (!stagedBibleVerse.reference.isEmpty()) stageBibleQuery(stagedBibleVerse.reference);
+    });
+    connect(biblePreview, &QPushButton::clicked, this, [this] {
+      if (!stagedBibleVerse.textAvailable) return;
+      if (vystrm_apply_bible_to_scene(true, stagedBibleVerse.reference, stagedBibleVerse.text))
+        bibleListenerStatus->setText(QString("● Preview staged — %1").arg(stagedBibleVerse.reference.toUpper()));
+      else
+        bibleListenerStatus->setText(QString("● Staged — preview scene unavailable — %1").arg(stagedBibleVerse.reference.toUpper()));
+    });
+    connect(biblePush, &QPushButton::clicked, this, [this] {
+      if (!stagedBibleVerse.textAvailable) return;
+      if (vystrm_apply_bible_to_scene(false, stagedBibleVerse.reference, stagedBibleVerse.text))
+        bibleListenerStatus->setText(QString("● Pushed to Program — %1").arg(stagedBibleVerse.reference.toUpper()));
+      else
+        bibleListenerStatus->setText("● Program graphic source unavailable");
+    });
+    connect(bibleClear, &QPushButton::clicked, this, [this] {
+      stagedBibleVerse = {};
+      bibleReference->setText("No reference staged");
+      bibleText->setText("Detected references will appear here. Nothing is sent to Program automatically.");
+      bibleHeard->setText("Heard: waiting for speech…");
+      biblePush->setEnabled(false);
+    });
     auto *cameraPage = new QWidget; auto *cameraLayout = new QVBoxLayout(cameraPage);
     cameraLayout->addWidget(new QLabel("CAMERA HEALTH"));
     cameras = new QComboBox; cameraLayout->addWidget(cameras); health = new QLabel("Select a connected camera to view health."); health->setObjectName("card"); health->setWordWrap(true); cameraLayout->addWidget(health);
@@ -207,6 +332,28 @@ public:
     });
     loop.exec();rootLayout->removeWidget(card);delete card;setupActive=false;return accepted;
   }
+public:
+  void handleBibleTranscript(const QString &transcript) {
+    const QString code = bibleTranslation ? bibleTranslation->currentData().toString() : "kjv";
+    stagedBibleVerse = bible.lookup(transcript, code);
+    if (bibleHeard) bibleHeard->setText(QString("Heard: \"%1\"").arg(transcript));
+    if (!bibleReference || !bibleText) return;
+    if (!stagedBibleVerse.referenceRecognized) {
+      bibleReference->setText("Reference not recognized");
+      bibleText->setText("The listener heard speech, but no Bible reference was resolved.");
+      if (biblePush) biblePush->setEnabled(false);
+      return;
+    }
+    bibleReference->setText(stagedBibleVerse.reference.toUpper() + (stagedBibleVerse.textAvailable ? "  •  READY" : "  •  PACK NEEDED"));
+    bibleText->setText(stagedBibleVerse.text);
+    if (biblePush) biblePush->setEnabled(stagedBibleVerse.textAvailable);
+    if (!bibleRecentReferences.contains(stagedBibleVerse.reference)) {
+      bibleRecentReferences.prepend(stagedBibleVerse.reference);
+      while (bibleRecentReferences.size() > 5) bibleRecentReferences.removeLast();
+    }
+    if (bibleRecent) bibleRecent->setText("Recent: " + bibleRecentReferences.join("  •  "));
+  }
+
 private slots:
   void refresh() {
     // Tally reads OBS scene state and therefore must run on the dock/UI thread.
@@ -257,9 +404,48 @@ private:
   VystrmAuthManager *auth{};
   QStackedWidget *stack{};
   QLabel *planBadge{};
-  QLabel *qr{},*status{},*health{}; QComboBox *cameras{},*talkbackCameras{}; HoldButton *talk{}; QString pairingPayload;
+  QLabel *qr{},*status{},*health{};
+  QComboBox *cameras{},*talkbackCameras{},*bibleTranslation{},*bibleAudioSource{};
+  QCheckBox *bibleListener{};
+  QLineEdit *bibleSearch{};
+  QLabel *bibleListenerStatus{},*bibleHeard{},*bibleReference{},*bibleText{},*bibleRecent{};
+  QPushButton *biblePreview{},*biblePush{},*bibleClear{};
+  HoldButton *talk{}; QString pairingPayload; QStringList bibleRecentReferences;
+  VystrmBibleAssistant bible; VystrmBibleVerse stagedBibleVerse;
   QSlider *zoom{},*exposure{},*brightness{};
 };
+
+extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text) {
+  obs_source_t *sceneSource = preview ? obs_frontend_get_current_preview_scene()
+                                      : obs_frontend_get_current_scene();
+  if (!sceneSource) return false;
+  obs_scene_t *scene = obs_scene_from_source(sceneSource);
+  if (!scene) { obs_source_release(sceneSource); return false; }
+  constexpr const char *sourceName = "VYSTRM Bible";
+  const QString graphicText = reference.toUpper() + "\n" + text;
+#ifdef _WIN32
+  constexpr const char *sourceType = "text_gdiplus";
+#else
+  constexpr const char *sourceType = "text_ft2_source";
+#endif
+  obs_source_t *source = obs_get_source_by_name(sourceName);
+  if (!source) {
+    obs_data_t *settings = obs_data_create();
+    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
+    source = obs_source_create(sourceType, sourceName, settings, nullptr);
+    obs_data_release(settings);
+    if (!source) { obs_source_release(sceneSource); return false; }
+    obs_scene_add(scene, source);
+  } else {
+    obs_data_t *settings = obs_source_get_settings(source);
+    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
+    obs_source_update(source, settings);
+    obs_data_release(settings);
+  }
+  obs_source_release(source);
+  obs_source_release(sceneSource);
+  return true;
+}
 
 extern "C" bool vystrm_dock_choose_camera_names(const char *suggested,const char *scenes,const char *srt_sources,const char *all_sources,char *scene_out,int scene_size,char *source_out,int source_size) {
   if(!g_vystrm_dock||!scene_out||!source_out||scene_size<2||source_size<2)return false;
@@ -313,6 +499,14 @@ extern "C" void vystrm_register_dock(void) {
 extern "C" void vystrm_unregister_dock(void) {
   obs_frontend_remove_event_callback(vystrm_frontend_event, nullptr);
   vystrm_dock_registered = false;
+}
+
+extern "C" void vystrm_bible_listener_transcript(const char *transcript) {
+  if (!g_vystrm_dock || !transcript) return;
+  const QString value = QString::fromUtf8(transcript);
+  QMetaObject::invokeMethod(g_vystrm_dock, [value] {
+    if (g_vystrm_dock) g_vystrm_dock->handleBibleTranscript(value);
+  }, Qt::QueuedConnection);
 }
 
 #include "vystrm-dock.moc"

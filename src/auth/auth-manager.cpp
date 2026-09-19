@@ -432,7 +432,8 @@ QString VystrmAuthManager::storedRefreshToken() const {
     }
   }
   authLog("No Windows refresh token was available.");
-  return {};#elif defined(__APPLE__)
+  return {};
+#elif defined(__APPLE__)
   const void *keys[] = {kSecClass, kSecAttrService, kSecAttrAccount,
                         kSecReturnData, kSecMatchLimit};
   const void *values[] = {kSecClassGenericPassword,

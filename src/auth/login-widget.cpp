@@ -174,10 +174,10 @@ VystrmLoginWidget::VystrmLoginWidget(VystrmAuthManager *auth, QWidget *parent)
   options->addWidget(remember_);
   auto *forgotRow = new QHBoxLayout;
   forgotRow->setContentsMargins(0,0,0,0);
-  forgotRow->addStretch();
   auto *forgot = new QPushButton("Forgot password?");
   forgot->setObjectName("link");
   forgotRow->addWidget(forgot);
+  forgotRow->addStretch();
   options->addLayout(forgotRow);
   loginLayout->addLayout(options);
   signIn_ = new QPushButton("Sign In  →");

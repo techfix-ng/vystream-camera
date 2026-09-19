@@ -265,16 +265,38 @@ static void restore_saved_sources(){
 
 static void send_tally_states(){
   if(g_shutting_down||!g_frontend_ready)return;
-  HMODULE front=GetModuleHandleW(L"obs-frontend-api.dll"); if(!front) return;
-  using Current=obs_source*(*)(); using Name=const char*(*)(const obs_source*); using Release=void(*)(obs_source*);
-  auto current=symbol<Current>(front,"obs_frontend_get_current_scene");auto preview=symbol<Current>(front,"obs_frontend_get_current_preview_scene");
-  auto name=symbol<Name>(obs_handle(),"obs_source_get_name");auto release=symbol<Release>(obs_handle(),"obs_source_release");
-  obs_source* programSource=current?current():nullptr;obs_source* previewSource=preview?preview():nullptr;
+  HMODULE front=GetModuleHandleW(L"obs-frontend-api.dll");
+  if(!front)return;
+  using Current=obs_source*(*)();
+  using Name=const char*(*)(const obs_source*);
+  using Release=void(*)(obs_source*);
+  auto current=symbol<Current>(front,"obs_frontend_get_current_scene");
+  auto preview=symbol<Current>(front,"obs_frontend_get_current_preview_scene");
+  auto name=symbol<Name>(obs_handle(),"obs_source_get_name");
+  auto release=symbol<Release>(obs_handle(),"obs_source_release");
+  obs_source* programSource=current?current():nullptr;
+  obs_source* previewSource=preview?preview():nullptr;
   const std::string program=(programSource&&name&&name(programSource))?name(programSource):"";
   const std::string previous=(previewSource&&name&&name(previewSource))?name(previewSource):"";
-  if(programSource&&release)release(programSource);if(previewSource&&release)release(previewSource);
+  if(programSource&&release)release(programSource);
+  if(previewSource&&release)release(previewSource);
+  const auto matches=[](const std::string &active,const TalkbackTarget &target){
+    if(active.empty())return false;
+    if(!target.scene.empty()&&!_stricmp(active.c_str(),target.scene.c_str()))return true;
+    return !target.name.empty()&&!_stricmp(active.c_str(),target.name.c_str());
+  };
   std::lock_guard<std::mutex> lock(g_talkback_mutex);
-  for(size_t i=0;i<g_talkback_targets.size();++i){const auto&t=g_talkback_targets[i];int state=(!program.empty()&&(!t.scene.empty()&&!_stricmp(program.c_str(),t.scene.c_str())||!_stricmp(program.c_str(),t.name.c_str())))?1:((!previous.empty()&&(!t.scene.empty()&&!_stricmp(previous.c_str(),t.scene.c_str())||!_stricmp(previous.c_str(),t.name.c_str())))?2:0);std::string packet="VYSTALLY1|"+t.token+"|"+std::to_string(state);sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(static_cast<u_short>(t.port));if(InetPtonA(AF_INET,t.ip.c_str(),&to.sin_addr)==1)sendto(g_socket,packet.data(),static_cast<int>(packet.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to));}
+  for(const auto &target:g_talkback_targets){
+    // The mobile receiver uses the textual VYSTALLY1 states. Numeric 0/1/2
+    // packets are ignored, which previously left every camera orange.
+    const char *state=matches(program,target)?"LIVE":(matches(previous,target)?"PREVIEW":"STANDBY");
+    const std::string packet="VYSTALLY1|"+target.token+"|"+state;
+    sockaddr_in to{};
+    to.sin_family=AF_INET;
+    to.sin_port=htons(static_cast<u_short>(target.port));
+    if(InetPtonA(AF_INET,target.ip.c_str(),&to.sin_addr)==1)
+      sendto(g_socket,packet.data(),static_cast<int>(packet.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to));
+  }
 }
 extern "C" void vystrm_send_tally_states(void){ send_tally_states(); }
 static void CALLBACK obs_frontend_event(int event, void*){

@@ -276,6 +276,7 @@ static void send_tally_states(){
   std::lock_guard<std::mutex> lock(g_talkback_mutex);
   for(size_t i=0;i<g_talkback_targets.size();++i){const auto&t=g_talkback_targets[i];int state=(!program.empty()&&(!t.scene.empty()&&!_stricmp(program.c_str(),t.scene.c_str())||!_stricmp(program.c_str(),t.name.c_str())))?1:((!previous.empty()&&(!t.scene.empty()&&!_stricmp(previous.c_str(),t.scene.c_str())||!_stricmp(previous.c_str(),t.name.c_str())))?2:0);std::string packet="VYSTALLY1|"+t.token+"|"+std::to_string(state);sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(static_cast<u_short>(t.port));if(InetPtonA(AF_INET,t.ip.c_str(),&to.sin_addr)==1)sendto(g_socket,packet.data(),static_cast<int>(packet.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to));}
 }
+extern "C" void vystrm_send_tally_states(void){ send_tally_states(); }
 static void CALLBACK obs_frontend_event(int event, void*){
   if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING){g_frontend_ready=true;restore_saved_sources();send_tally_states();return;}
   if(event==OBS_FRONTEND_EVENT_EXIT){g_frontend_ready=false;return;}

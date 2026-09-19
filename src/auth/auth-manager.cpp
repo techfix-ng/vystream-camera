@@ -51,6 +51,8 @@ QString sessionDirectory() {
 QString protectedTokenPath() {
   return sessionDirectory() + "/vystrm-session.bin";
 }
+void authLog(const QString &message);
+
 QString rememberedEmailPath() {
   return sessionDirectory() + "/remembered-email.txt";
 }

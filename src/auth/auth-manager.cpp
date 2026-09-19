@@ -481,7 +481,16 @@ void VystrmAuthManager::storeRefreshToken(const QString &token) {
     qWarning() << "VYSTREAM could not write Windows Credential Manager entry:" << error;
     authLog(QString("Credential Manager write failed (Windows error %1).").arg(error));
   } else {
-    authLog("Refresh token saved to Windows Credential Manager.");
+    PCREDENTIALW verify = nullptr;
+    bool verified = false;
+    if (CredReadW(kCredentialTarget, CRED_TYPE_GENERIC, 0, &verify)) {
+      const QByteArray stored(reinterpret_cast<const char *>(verify->CredentialBlob),
+                              static_cast<int>(verify->CredentialBlobSize));
+      verified = stored == bytes;
+      CredFree(verify);
+    }
+    authLog(verified ? "Refresh token saved and verified in Windows Credential Manager."
+                     : "Refresh token write completed but read-back verification failed.");
   }
 
   DATA_BLOB input{static_cast<DWORD>(bytes.size()),

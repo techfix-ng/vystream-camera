@@ -282,7 +282,7 @@ void VystrmAuthManager::restoreSession() {
   });
 }
 
-void VystrmAuthManager::acceptSession(const QByteArray &payload, bool remember) {
+void VystrmAuthManager::acceptSession(const QByteArray &payload, bool /*remember*/) {
   const auto document = QJsonDocument::fromJson(payload);
   if (!document.isObject()) {
     emit errorOccurred("The VYSTREAM service returned an invalid response.");

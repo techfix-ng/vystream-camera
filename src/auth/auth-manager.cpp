@@ -292,7 +292,10 @@ void VystrmAuthManager::acceptSession(const QByteArray &payload, bool remember) 
     emit errorOccurred("The VYSTREAM service did not return a session.");
     return;
   }
-  if (remember && !refreshToken.isEmpty()) storeRefreshToken(refreshToken);
+  // The plugin is expected to restore the account after OBS restarts. The
+  // checkbox remains part of the UI, but a successful session always persists
+  // the returned refresh token; only explicit Sign Out clears it.
+  if (!refreshToken.isEmpty()) storeRefreshToken(refreshToken);
   applyEntitlements(object.value("entitlements").toObject());
   authenticated_ = true;
   publish(entitlements_, true);

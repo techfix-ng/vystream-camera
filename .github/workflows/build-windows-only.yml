@@ -91,7 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "vystream-v3.0.5"
+          $tag = "vystream-v3.0.5-bible"
           $asset = "$env:GITHUB_WORKSPACE\release\VYSTREAM-OBS-Plugin-v3.0.5-Setup.exe"
           Copy-Item "$env:GITHUB_WORKSPACE\release\VYSTREAM-Auth-TLS-Fix-Setup.exe" $asset -Force
           gh release view $tag 2>$null

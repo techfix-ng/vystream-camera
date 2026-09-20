@@ -31,6 +31,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrl>
+#include <QSizePolicy>
 #include <QFile>
 #include <QDir>
 #include <QDateTime>

@@ -34,7 +34,7 @@
   "platformConfig": {"macos": {"bundleId": "com.vystream.obs-camera-dock"}},
   "name": "obs-srt-camera",
   "displayName": "VYSTREAM OBS Plugin",
-  "version": "3.0.0",
+  "version": "3.0.5",
   "author": "VYSTREAM / TechFixNG",
   "website": "https://vystream.techfixng.com",
   "email": "support@techfixng.com"

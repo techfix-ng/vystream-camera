@@ -11,7 +11,7 @@ on:
       - feature/existing-scene-source-picker
       - fix/persistent-login-session-v3.0.2
       - fix/obs-scene-shutdown-crash-v3.0.3
-      - fix/vystream-v3.0.5
+      - fix/session-restore-v3.0.4
   workflow_dispatch:
 
 permissions:

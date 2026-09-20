@@ -59,6 +59,7 @@ void vystrm_send_tally_states(void);
 bool vystrm_apply_bible_to_scene(bool preview, const QString &reference,
                                   const QString &text, const QString &skin,
                                   int opacity);
+bool vystrm_clear_bible_from_scenes(void);
 }
 
 class HoldButton final : public QPushButton {
@@ -185,15 +186,23 @@ public:
     for (const auto &translation : bible.translations())
       bibleTranslation->addItem(translation.label, translation.code);
     bibleSkin = new QComboBox;
-    bibleSkin->setToolTip("Verse graphic skin");
-    bibleSkin->setMaximumWidth(104);
+    bibleSkin->setToolTip("Choose the lower-third verse graphic skin");
+    bibleSkin->setMinimumWidth(132);
+    bibleSkin->setMaximumWidth(156);
     for (const auto &skin : bible.skins())
       bibleSkin->addItem(skin.label, skin.code);
     bibleHeader->addWidget(bibleTitle);
     bibleHeader->addStretch();
     bibleHeader->addWidget(bibleTranslation);
-    bibleHeader->addWidget(bibleSkin);
     bibleLayout->addLayout(bibleHeader);
+
+    auto *skinRow = new QHBoxLayout;
+    auto *skinLabel = new QLabel("VERSE SKIN");
+    skinLabel->setStyleSheet("color:#9fb1c8;font-size:10px;font-weight:700;");
+    skinRow->addWidget(skinLabel);
+    skinRow->addStretch();
+    skinRow->addWidget(bibleSkin);
+    bibleLayout->addLayout(skinRow);
 
     auto *listenerRow = new QHBoxLayout;
     bibleListener = new QCheckBox("Live Listener");
@@ -293,11 +302,15 @@ public:
         bibleListenerStatus->setText("● Program graphic source unavailable");
     });
     connect(bibleClear, &QPushButton::clicked, this, [this] {
+      const bool removed = vystrm_clear_bible_from_scenes();
       stagedBibleVerse = {};
       bibleReference->setText("No reference staged");
-      bibleText->setText("Detected references will appear here. Nothing is sent to Program automatically.");
+      bibleText->setText("Cleared from Preview and Program. Nothing is sent live automatically.");
       bibleHeard->setText("Heard: waiting for speech…");
       biblePush->setEnabled(false);
+      bibleListenerStatus->setText(removed
+        ? "● Cleared from Preview and Program"
+        : "● Cleared — no verse graphic was active");
     });
     auto *cameraPage = new QWidget; auto *cameraLayout = new QVBoxLayout(cameraPage);
     cameraLayout->addWidget(new QLabel("CAMERA HEALTH"));
@@ -659,6 +672,30 @@ static QString writeBibleGraphicHtml(const QString &reference, const QString &te
   file.write(html.toUtf8());
   file.close();
   return QUrl::fromLocalFile(filePath).toString(QUrl::FullyEncoded);
+}
+
+extern "C" bool vystrm_clear_bible_from_scenes(void) {
+  bool removed = false;
+  const char *names[] = {"VYSTRM Bible — Preview", "VYSTRM Bible — Program"};
+  obs_source_t *scenes[] = {
+    obs_frontend_get_current_preview_scene(),
+    obs_frontend_get_current_scene()
+  };
+
+  for (obs_source_t *sceneSource : scenes) {
+    if (!sceneSource) continue;
+    obs_scene_t *scene = obs_scene_from_source(sceneSource);
+    if (scene) {
+      for (const char *name : names) {
+        if (obs_sceneitem_t *item = obs_scene_find_source(scene, name)) {
+          obs_sceneitem_remove(item);
+          removed = true;
+        }
+      }
+    }
+    obs_source_release(sceneSource);
+  }
+  return removed;
 }
 
 extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &reference,

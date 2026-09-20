@@ -1,10 +1,10 @@
 Unicode True
 RequestExecutionLevel admin
-Name "VYSTREAM OBS Authentication Repair"
+Name "VYSTREAM OBS Plugin v3.0.5"
 InstallDir "$PROGRAMFILES64\obs-studio\obs-plugins\64bit"
 OutFile "${OUTPUT_DIR}\VYSTREAM-Auth-TLS-Fix-Setup.exe"
 ShowInstDetails show
-BrandingText "VYSTREAM / TechFixNG"
+BrandingText "VYSTREAM / TechFixNG · v3.0.5"
 
 Page instfiles
 

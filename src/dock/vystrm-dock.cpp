@@ -559,30 +559,160 @@ private:
   QSlider *zoom{},*exposure{},*brightness{};
 };
 
-extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &reference, const QString &text) {
+static QString bibleHtmlEscape(const QString &value) {
+  return value.toHtmlEscaped().replace("\n", "<br/>");
+}
+
+static QString bibleSkinCss(const QString &skin) {
+  const QString common = R"CSS(
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#fff}
+    .stage{position:relative;width:100vw;height:100vh;display:flex;align-items:flex-end;
+      box-sizing:border-box;padding:0 2.2vw 2.4vh;overflow:hidden}
+    .panel{position:relative;width:100%;box-sizing:border-box;padding:1.8vh 3vw 2vh;
+      border-radius:22px;overflow:hidden;isolation:isolate}
+    .badge{display:inline-block;position:relative;z-index:2;padding:.55vh 2.1vw;
+      margin-bottom:1.3vh;border-radius:999px;font-size:clamp(18px,2.1vw,44px);
+      font-weight:800;letter-spacing:.04em}
+    .verse{position:relative;z-index:2;font-size:clamp(20px,2.15vw,46px);line-height:1.25;
+      font-weight:600;text-shadow:0 2px 4px rgba(0,0,0,.7)}
+    .orb{position:absolute;border-radius:50%;filter:blur(20px);opacity:.8;pointer-events:none;
+      animation:drift 12s ease-in-out infinite alternate}
+    .orb-a{width:44vw;height:16vw;left:-8vw;bottom:-9vw;background:#ffb41f}
+    .orb-b{width:35vw;height:12vw;right:-5vw;bottom:-7vw;background:#1ba8ff;animation-delay:-4s}
+    @keyframes drift{from{transform:translate3d(-2%,0,0) rotate(-2deg)}
+      to{transform:translate3d(3%,-5%,0) rotate(2deg)}}
+  )CSS";
+  QString skinCss;
+  if (skin == "midnight-glass") {
+    skinCss = R"CSS(
+      .panel{background:rgba(8,15,29,.82);border:2px solid rgba(70,207,255,.72);
+        box-shadow:0 0 28px rgba(0,178,255,.35),inset 0 0 34px rgba(31,93,143,.24)}
+      .badge{background:rgba(28,184,255,.18);border:1px solid #42d5ff;color:#d8f8ff}
+      .orb-a{background:#164c9c}.orb-b{background:#10d8ff}
+    )CSS";
+  } else if (skin == "blue-pulse") {
+    skinCss = R"CSS(
+      .panel{background:linear-gradient(115deg,rgba(3,23,60,.92),rgba(9,73,153,.78));
+        border:2px solid rgba(25,185,255,.9);box-shadow:0 0 28px rgba(25,185,255,.38)}
+      .panel:after{content:'';position:absolute;left:-10%;right:-10%;bottom:15%;
+        height:3px;background:#27d8ff;box-shadow:0 0 16px #27d8ff;
+        animation:pulse 3s ease-in-out infinite}
+      .badge{background:#0d71db;color:#fff;box-shadow:0 0 12px rgba(15,152,255,.8)}
+      @keyframes pulse{50%{transform:translateX(8%);opacity:.55}}
+      .orb-a{background:#0655ff}.orb-b{background:#19e5ff}
+    )CSS";
+  } else if (skin == "royal-burgundy") {
+    skinCss = R"CSS(
+      .panel{background:linear-gradient(110deg,rgba(54,8,27,.94),rgba(117,25,42,.82));
+        border:2px solid rgba(255,204,108,.82);box-shadow:0 0 28px rgba(255,104,24,.38)}
+      .badge{background:#d99429;color:#32130b;border:1px solid #ffd276}
+      .orb-a{background:#ff8d22}.orb-b{background:#c51e46}
+    )CSS";
+  } else if (skin == "clean-light") {
+    skinCss = R"CSS(
+      body{color:#132033}.verse{text-shadow:0 1px 2px rgba(255,255,255,.8)}
+      .panel{background:rgba(247,250,255,.88);border:2px solid rgba(34,112,193,.75);
+        box-shadow:0 5px 22px rgba(0,20,50,.3)}
+      .badge{background:#f4b63d;color:#17243a}.verse{color:#132033}
+      .orb-a{background:#ffd16b}.orb-b{background:#6fc8ff}
+    )CSS";
+  } else {
+    skinCss = R"CSS(
+      .panel{background:rgba(7,22,38,.76);border:2px solid rgba(255,185,53,.72);
+        box-shadow:0 0 34px rgba(255,169,24,.34),inset 0 0 42px rgba(9,107,165,.24)}
+      .panel:before{content:'';position:absolute;inset:-30% -5%;z-index:0;
+        background:linear-gradient(105deg,transparent 20%,rgba(255,175,41,.7) 35%,
+        transparent 47%,rgba(32,172,255,.7) 68%,transparent 81%);
+        filter:blur(9px);transform:rotate(-2deg);animation:trails 8s ease-in-out infinite alternate}
+      .badge{background:linear-gradient(105deg,#ffc44f,#f4a526);color:#10223d;
+        border:1px solid #ffe19a;box-shadow:0 3px 12px rgba(255,172,29,.45)}
+      .orb-a{background:#ffb21d}.orb-b{background:#168cff}
+      @keyframes trails{from{transform:translateX(-10%) rotate(-2deg)}
+        to{transform:translateX(10%) rotate(2deg)}}
+    )CSS";
+  }
+  return common + skinCss;
+}
+
+static QString writeBibleGraphicHtml(const QString &reference, const QString &text,
+                                     const QString &skin, int opacity) {
+  QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  if (base.isEmpty()) base = QDir::tempPath();
+  QDir directory(base + "/bible");
+  directory.mkpath(".");
+  const QString filePath = directory.filePath("vystream-bible-live.html");
+  QString html = R"HTML(<!doctype html><html><head><meta charset="utf-8"><style>
+{{CSS}}
+</style></head><body><div class="stage"><div class="orb orb-a"></div>
+<div class="orb orb-b"></div><div class="panel" style="opacity:{{OPACITY}}">
+<div class="badge">{{REFERENCE}}</div><div class="verse">{{TEXT}}</div></div></div></body></html>)HTML";
+  html.replace("{{CSS}}", bibleSkinCss(skin));
+  html.replace("{{OPACITY}}", QString::number(qBound(25, opacity, 100) / 100.0, 'f', 2));
+  html.replace("{{REFERENCE}}", bibleHtmlEscape(reference.toUpper()));
+  html.replace("{{TEXT}}", bibleHtmlEscape(text));
+  QFile file(filePath);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
+  file.write(html.toUtf8());
+  file.close();
+  return QUrl::fromLocalFile(filePath).toString(QUrl::FullyEncoded);
+}
+
+extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &reference,
+                                             const QString &text, const QString &skin,
+                                             int opacity) {
   obs_source_t *sceneSource = preview ? obs_frontend_get_current_preview_scene()
                                       : obs_frontend_get_current_scene();
   if (!sceneSource) return false;
   obs_scene_t *scene = obs_scene_from_source(sceneSource);
   if (!scene) { obs_source_release(sceneSource); return false; }
-  constexpr const char *sourceName = "VYSTRM Bible";
-  const QString graphicText = reference.toUpper() + "\n" + text;
-#ifdef _WIN32
-  constexpr const char *sourceType = "text_gdiplus";
-#else
-  constexpr const char *sourceType = "text_ft2_source";
-#endif
-  obs_source_t *source = obs_get_source_by_name(sourceName);
+
+  obs_video_info videoInfo{};
+  const bool haveVideoInfo = obs_get_video_info(&videoInfo);
+  const int canvasWidth = haveVideoInfo ? int(videoInfo.base_width) : 1920;
+  const int canvasHeight = haveVideoInfo ? int(videoInfo.base_height) : 1080;
+  const QString sourceName = preview ? "VYSTRM Bible — Preview" : "VYSTRM Bible — Program";
+  const QString url = writeBibleGraphicHtml(reference, text, skin, opacity);
+  if (url.isEmpty()) { obs_source_release(sceneSource); return false; }
+
+  obs_source_t *source = obs_get_source_by_name(sourceName.toUtf8().constData());
   if (!source) {
     obs_data_t *settings = obs_data_create();
-    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
-    source = obs_source_create(sourceType, sourceName, settings, nullptr);
+    obs_data_set_string(settings, "url", url.toUtf8().constData());
+    obs_data_set_int(settings, "width", canvasWidth);
+    obs_data_set_int(settings, "height", canvasHeight);
+    obs_data_set_int(settings, "fps", 30);
+    obs_data_set_bool(settings, "reroute_audio", false);
+    source = obs_source_create("browser_source", sourceName.toUtf8().constData(),
+                               settings, nullptr);
     obs_data_release(settings);
+    if (!source) {
+#ifdef _WIN32
+      const char *fallbackType = "text_gdiplus";
+#else
+      const char *fallbackType = "text_ft2_source";
+#endif
+      obs_data_t *fallback = obs_data_create();
+      const QString fallbackText = reference.toUpper() + "\n" + text;
+      obs_data_set_string(fallback, "text", fallbackText.toUtf8().constData());
+      source = obs_source_create(fallbackType, sourceName.toUtf8().constData(),
+                                 fallback, nullptr);
+      obs_data_release(fallback);
+    }
     if (!source) { obs_source_release(sceneSource); return false; }
     obs_scene_add(scene, source);
   } else {
     obs_data_t *settings = obs_source_get_settings(source);
-    obs_data_set_string(settings, "text", graphicText.toUtf8().constData());
+    const char *sourceId = obs_source_get_id(source);
+    if (sourceId && QString::fromUtf8(sourceId) == "browser_source") {
+      obs_data_set_string(settings, "url", url.toUtf8().constData());
+      obs_data_set_int(settings, "width", canvasWidth);
+      obs_data_set_int(settings, "height", canvasHeight);
+      obs_data_set_int(settings, "fps", 30);
+    } else {
+      obs_data_set_string(settings, "text",
+                          (reference.toUpper() + "\n" + text).toUtf8().constData());
+    }
     obs_source_update(source, settings);
     obs_data_release(settings);
   }

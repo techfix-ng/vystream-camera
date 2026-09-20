@@ -1,0 +1,69 @@
+name: Build VYSTREAM macOS plugin (auth and tally)
+
+on:
+  push:
+    branches:
+      - fix/windows-obs-shutdown-crash
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build macOS universal plugin
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build plugin
+        uses: ./.github/actions/build-plugin
+        with:
+          target: macos-universal
+          config: RelWithDebInfo
+          codesign: false
+
+      - name: Package plugin
+        uses: ./.github/actions/package-plugin
+        with:
+          target: macos-universal
+          config: RelWithDebInfo
+          package: true
+          codesign: false
+          notarize: false
+
+      - name: Create unsigned VYSTREAM macOS installer ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/VYSTREAM-OBS-Dock-macOS"
+          mkdir -p "$stage"
+          ditto "$GITHUB_WORKSPACE/release/RelWithDebInfo/obs-srt-camera.plugin" "$stage/obs-srt-camera.plugin"
+          cp "$GITHUB_WORKSPACE/installer/macos/install.command" "$stage/install.command"
+          chmod +x "$stage/install.command"
+          ditto -c -k --sequesterRsrc --keepParent "$stage" "$GITHUB_WORKSPACE/release/VYSTREAM-OBS-Dock-macOS-Installer.zip"
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: VYSTREAM-OBS-Dock-macOS-Installer
+          path: release/VYSTREAM-OBS-Dock-macOS-Installer.zip
+
+      - name: Publish direct-download macOS installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="session-restore-v3.0.4"
+          asset="$GITHUB_WORKSPACE/release/VYSTREAM-OBS-Dock-macOS-Installer-v3.0.4.zip"
+          cp "$GITHUB_WORKSPACE/release/VYSTREAM-OBS-Dock-macOS-Installer.zip" "$asset"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" \
+              --title "VYSTREAM Session Restore v3.0.4" \
+              --notes "VYSTREAM OBS plugin installers with persistent authentication and textual tally states."
+          fi
+          gh release upload "$tag" "$asset" --clobber

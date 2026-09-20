@@ -48,3 +48,11 @@ The macOS installer closes OBS, removes old per-user and system-wide plugin copi
 After installation the UI is available at **OBS → Docks → VyStream Camera**.
 
 Unsigned artifacts are suitable for testing. Public macOS distribution requires Apple Developer signing/notarization; Windows reputation requires Authenticode signing.
+
+
+## Current plugin line
+
+The current build line is **VYSTREAM OBS Plugin v3.0.5**. Bible graphics are temporary
+operator-controlled overlays: opening the dock clears stale VYSTRM Bible scene items,
+Preview stages a graphic, Push to Program makes it live, and Clear removes it from
+both Preview and Program.

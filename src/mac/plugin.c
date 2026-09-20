@@ -24,6 +24,7 @@ typedef struct obs_scene obs_scene_t;
 typedef struct obs_sceneitem obs_sceneitem_t;
 static obs_module_t *module_pointer;
 static volatile bool running;
+static volatile bool shutting_down;
 static int discovery_socket = -1;
 static pthread_t worker;
 static bool worker_started;
@@ -32,7 +33,7 @@ static pthread_t return_worker;
 static bool return_worker_started;
 static AudioQueueRef reply_output;
 typedef struct {
-	char id[96], name[128], ip[64], token[17];
+	char id[96], name[128], scene[128], ip[64], token[17];
 	int port;
 } TalkbackTarget;
 static TalkbackTarget talkback_targets[128];
@@ -47,6 +48,10 @@ extern "C" void vystrm_register_dock(void);
 extern void vystrm_register_dock(void);
 #endif
 #endif
+extern bool vystrm_auth_is_authenticated(void);
+extern int vystrm_auth_max_cameras(void);
+extern int vystrm_auth_max_width(void);
+extern int vystrm_auth_max_height(void);
 
 static void send_talkback(const void *bytes, size_t length)
 {
@@ -533,6 +538,59 @@ const char *vystrm_camera_health(int index)
 	snprintf(value, sizeof(value), "STATE CONNECTED\\nCAMERA %s", talkback_targets[index].name);
 	return value;
 }
+void vystrm_set_camera_control(int index, const char *control, const char *value)
+{
+	if (shutting_down || !control || index < 0 || index >= talkback_count)
+		return;
+	char packet[1024];
+	int length = snprintf(packet, sizeof(packet), "VYSCONTROL1|%s|%s|%s", talkback_targets[index].token,
+				 control, value ? value : "");
+	if (length <= 0 || length >= (int)sizeof(packet))
+		return;
+	struct sockaddr_in to = {0};
+	to.sin_family = AF_INET;
+	to.sin_port = htons(talkback_targets[index].port);
+	if (inet_pton(AF_INET, talkback_targets[index].ip, &to.sin_addr) == 1)
+		sendto(discovery_socket, packet, (size_t)length, 0, (struct sockaddr *)&to, sizeof(to));
+}
+bool vystrm_rename_camera(int index, const char *scene, const char *source)
+{
+	if (shutting_down || index < 0 || index >= talkback_count || !scene || !source ||
+	    !*scene || !*source || !strcasecmp(scene, source) || !unique_names(scene, source, talkback_targets[index].id))
+		return false;
+	Device devices[128];
+	int count = load_devices(devices, 128);
+	for (int i = count - 1; i >= 0; i--) {
+		if (strcmp(devices[i].id, talkback_targets[index].id))
+			continue;
+		Device updated = devices[i];
+		snprintf(updated.scene_name, sizeof(updated.scene_name), "%s", scene);
+		snprintf(updated.source_name, sizeof(updated.source_name), "%s", source);
+		save_device(&updated);
+		snprintf(talkback_targets[index].scene, sizeof(talkback_targets[index].scene), "%s", scene);
+		snprintf(talkback_targets[index].name, sizeof(talkback_targets[index].name), "%s", source);
+		void (*source_set_name)(obs_source_t *, const char *) = dlsym(RTLD_DEFAULT, "obs_source_set_name");
+		obs_source_t *(*source_by_name)(const char *) = dlsym(RTLD_DEFAULT, "obs_get_source_by_name");
+		void (*source_release)(obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_release");
+		if (source_set_name && source_by_name && source_release) {
+			obs_source_t *old_scene = source_by_name(devices[i].scene_name);
+			if (old_scene) {
+				source_set_name(old_scene, scene);
+				source_release(old_scene);
+			}
+			obs_source_t *old_source = source_by_name(devices[i].source_name);
+			if (old_source) {
+				source_set_name(old_source, source);
+				source_release(old_source);
+			}
+		}
+		void (*frontend_save)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_save");
+		if (frontend_save)
+			frontend_save();
+		return true;
+	}
+	return false;
+}
 void vystrm_select_camera(int index)
 {
 	talkback_selected = index;
@@ -553,6 +611,8 @@ static void create_source(void *parameter)
 {
 	SourceRequest req = *(SourceRequest *)parameter;
 	free(parameter);
+	if (shutting_down)
+		return;
 	obs_data_t *(*data_create)(void) = dlsym(RTLD_DEFAULT, "obs_data_create");
 	void (*data_string)(obs_data_t *, const char *, const char *) = dlsym(RTLD_DEFAULT, "obs_data_set_string");
 	void (*data_bool)(obs_data_t *, const char *, bool) = dlsym(RTLD_DEFAULT, "obs_data_set_bool");
@@ -643,8 +703,12 @@ static void *discovery_loop(void *unused)
 			continue;
 		clean_field(id);
 		clean_field(suggested);
+		if (!vystrm_auth_is_authenticated())
+			continue;
 		Device d = {0};
 		if (!find_device(id, &d)) {
+			if (talkback_count >= vystrm_auth_max_cameras())
+				continue;
 			snprintf(d.id, sizeof(d.id), "%s", id);
 			d.port = next_port();
 			if (!ask_scene_source_names(suggested, id, d.scene_name, sizeof(d.scene_name), d.source_name,
@@ -673,6 +737,8 @@ static void *discovery_loop(void *unused)
 				snprintf(talkback_targets[slot].id, sizeof(talkback_targets[slot].id), "%s", id);
 				snprintf(talkback_targets[slot].name, sizeof(talkback_targets[slot].name), "%s",
 					 d.source_name);
+				snprintf(talkback_targets[slot].scene, sizeof(talkback_targets[slot].scene), "%s",
+					 d.scene_name);
 				snprintf(talkback_targets[slot].ip, sizeof(talkback_targets[slot].ip), "%s", phone);
 				snprintf(talkback_targets[slot].token, sizeof(talkback_targets[slot].token), "%s",
 					 d.token);
@@ -682,12 +748,56 @@ static void *discovery_loop(void *unused)
 		char host[256], ip[64], offer[1024];
 		computer_name(host, sizeof(host));
 		local_ip_for(&sender, ip, sizeof(ip));
-		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V3|%s|%s|%d|%s|%s", host, ip, d.port, d.token,
-			 d.source_name);
+		snprintf(offer, sizeof(offer), "OBS_SRT_OFFER_V4|%s|%s|%s|%d|%s|%s|macos|obs|3.0.4",
+				 desktop_token(), host, ip, d.port, d.token, d.source_name);
 		sendto(discovery_socket, offer, strlen(offer), 0, (struct sockaddr *)&sender, z);
 		queue_source(d.scene_name, d.source_name, d.port);
 	}
 	return NULL;
+}
+
+static int tally_matches(const char *active, const TalkbackTarget *target)
+{
+	if (!active || !*active || !target)
+		return 0;
+	if (target->scene[0] && strcasecmp(active, target->scene) == 0)
+		return 1;
+	return target->name[0] && strcasecmp(active, target->name) == 0;
+}
+
+void vystrm_send_tally_states(void)
+{
+	if (shutting_down || !running || discovery_socket < 0)
+		return;
+	obs_source_t *(*current_scene)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_get_current_scene");
+	obs_source_t *(*preview_scene)(void) = dlsym(RTLD_DEFAULT, "obs_frontend_get_current_preview_scene");
+	const char *(*source_name)(const obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_get_name");
+	void (*source_release)(obs_source_t *) = dlsym(RTLD_DEFAULT, "obs_source_release");
+	obs_source_t *program = current_scene ? current_scene() : NULL;
+	obs_source_t *preview = preview_scene ? preview_scene() : NULL;
+	char program_name[256] = {0}, preview_name[256] = {0};
+	if (program && source_name)
+		snprintf(program_name, sizeof(program_name), "%s", source_name(program));
+	if (preview && source_name)
+		snprintf(preview_name, sizeof(preview_name), "%s", source_name(preview));
+	if (program && source_release)
+		source_release(program);
+	if (preview && source_release)
+		source_release(preview);
+	for (int i = 0; i < talkback_count; i++) {
+		const TalkbackTarget *target = &talkback_targets[i];
+		// The mobile receiver uses textual VYSTALLY1 states. Numeric 0/1/2
+		// packets are ignored, which previously left every camera orange.
+		const char *state = tally_matches(program_name, target) ? "LIVE" :
+			(tally_matches(preview_name, target) ? "PREVIEW" : "STANDBY");
+		char packet[256];
+		int length = snprintf(packet, sizeof(packet), "VYSTALLY1|%s|%s", target->token, state);
+		struct sockaddr_in to = {0};
+		to.sin_family = AF_INET;
+		to.sin_port = htons(target->port);
+		if (length > 0 && inet_pton(AF_INET, target->ip, &to.sin_addr) == 1)
+			sendto(discovery_socket, packet, (size_t)length, 0, (struct sockaddr *)&to, sizeof(to));
+	}
 }
 
 __attribute__((visibility("default"))) void obs_module_set_pointer(obs_module_t *m)
@@ -701,11 +811,11 @@ __attribute__((visibility("default"))) uint32_t obs_module_ver(void)
 }
 __attribute__((visibility("default"))) const char *obs_module_name(void)
 {
-	return "VyStream Camera 2.9.0";
+	return "VYSTREAM Camera 3.0.4";
 }
 __attribute__((visibility("default"))) const char *obs_module_description(void)
 {
-	return "Discovers VYSTRM Camera devices and adds SRT listener sources.";
+	return "VYSTREAM Camera authentication, subscription entitlements, persistent OBS sources, tally, and talkback.";
 }
 __attribute__((visibility("default"))) const char *obs_module_author(void)
 {
@@ -713,6 +823,7 @@ __attribute__((visibility("default"))) const char *obs_module_author(void)
 }
 __attribute__((visibility("default"))) bool obs_module_load(void)
 {
+	shutting_down = false;
 	restore_saved_sources();
 	register_talkback_menu();
 	discovery_socket = socket(AF_INET, SOCK_DGRAM, 0);
@@ -743,6 +854,7 @@ __attribute__((visibility("default"))) bool obs_module_load(void)
 }
 __attribute__((visibility("default"))) void obs_module_unload(void)
 {
+	shutting_down = true;
 	stop_talkback();
 	running = false;
 	if (discovery_socket >= 0) {

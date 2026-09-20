@@ -19,14 +19,16 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
   src/auth/auth-manager.h
   src/auth/login-widget.cpp
   src/auth/login-widget.h
+  src/bible/bible-assistant.cpp
+  src/bible/bible-assistant.h
   src/qr_v4.h
 )
 if(WIN32)
   target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin.cpp)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32 shell32 advapi32 iphlpapi gdi32 winmm)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32 shell32 advapi32 crypt32 iphlpapi gdi32 winmm)
 elseif(APPLE)
   target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/mac/plugin.c)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework AudioToolbox" "-framework CoreAudio")
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE "-framework AudioToolbox" "-framework CoreAudio" "-framework Security")
 else()
   message(FATAL_ERROR "VyStream OBS Dock supports Windows and macOS only")
 endif()

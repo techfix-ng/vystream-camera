@@ -4,8 +4,16 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-$configFile = getenv('VYSTRM_CONFIG_FILE');
+$configFile = getenv('VYSTRM_CONFIG_FILE') ?: '';
 if (!$configFile || !is_file($configFile)) {
+    // cPanel/shared-hosting deployments commonly keep config.php beside
+    // the public api/ directory. The environment variable remains preferred.
+    $candidate = dirname(__DIR__, 2) . '/config/config.php';
+    if (is_file($candidate) && is_readable($candidate)) {
+        $configFile = $candidate;
+    }
+}
+if (!$configFile || !is_file($configFile) || !is_readable($configFile)) {
     http_response_code(503);
     echo json_encode(['error' => 'service_not_configured']);
     exit;
@@ -193,9 +201,27 @@ try {
         $query->execute([tokenHash($refresh, $config)]);
         $row = $query->fetch();
         if (!$row) response(['error'=>'invalid_refresh_token'], 401);
-        $pdo->prepare('UPDATE refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE id=?')
-            ->execute([$row['id']]);
-        response(issueSession($pdo, $config, $row));
+
+        // The refresh-token row has its own primary key; it is not the
+        // user's id. Passing the row directly to issueSession() caused a
+        // foreign-key failure (HTTP 500) during refresh, then the old token
+        // was already revoked and every retry became HTTP 401. Issue the
+        // replacement session for the actual user first, and revoke the old
+        // token only after the replacement was created successfully.
+        $sessionUser = [
+            'id' => (int)$row['user_id'],
+            'email' => $row['email'],
+            'display_name' => $row['display_name'],
+        ];
+        try {
+            $session = issueSession($pdo, $config, $sessionUser);
+            $pdo->prepare('UPDATE refresh_tokens SET revoked_at=UTC_TIMESTAMP() WHERE id=?')
+                ->execute([(int)$row['id']]);
+            response($session);
+        } catch (Throwable $error) {
+            error_log('VYSTREAM refresh session failed: ' . $error->getMessage());
+            response(['error'=>'refresh_session_failed'], 500);
+        }
     }
 
     if ($method === 'POST' && $path === '/auth/logout') {

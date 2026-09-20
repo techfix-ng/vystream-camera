@@ -23,6 +23,7 @@ public:
   explicit VystrmAuthManager(QObject *parent = nullptr);
   bool isAuthenticated() const;
   QString accountEmail() const;
+  QString rememberedEmail() const;
   VystrmEntitlements entitlements() const;
 
 public slots:
@@ -59,6 +60,7 @@ private:
   VystrmEntitlements entitlements_;
   bool authenticated_ = false;
   bool busy_ = false;
+  int restoreAttempts_ = 0;
 };
 
 extern "C" {

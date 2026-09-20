@@ -6,6 +6,7 @@ on:
       - master
       - main
       - 'release/**'
+      - 'fix/windows-obs-shutdown-crash'
     tags:
       - '*'
 permissions:

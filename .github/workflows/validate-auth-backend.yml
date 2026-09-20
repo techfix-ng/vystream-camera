@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - windows-auth-v3.0.0
+      - fix/windows-obs-shutdown-crash
     paths:
       - 'server/**'
       - '.github/workflows/validate-auth-backend.yml'

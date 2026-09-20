@@ -388,6 +388,9 @@ public:
 
     auto *timer = new QTimer(this); connect(timer,&QTimer::timeout,this,&VyStreamDock::refresh); timer->start(750);
     refresh();
+    // Never leave a Bible graphic permanently on Program when OBS reopens.
+    // Bible graphics are temporary operator-controlled overlays.
+    QTimer::singleShot(0, this, [] { vystrm_clear_bible_from_scenes(); });
     // Defer the first refresh until OBS has returned to its event loop. OBS
     // owns the dock lifecycle, but it does not own plugin authentication state.
     QTimer::singleShot(0, auth, &VystrmAuthManager::restoreSession);

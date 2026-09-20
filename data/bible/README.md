@@ -3,37 +3,44 @@
 The OBS dock uses a translation-pack interface so the UI, reference detector,
 and verse renderer do not depend on one hard-coded language.
 
-## Pack requirements
+## HelloAO source
 
-A pack should provide:
+VYSTRM retrieves the selected chapter from the HelloAO Free Use Bible API:
 
-- a stable translation code (`yoruba`, `igbo`, `hausa`, etc.);
-- UTF-8 verse text with full diacritics preserved;
-- canonical book IDs (`john`, `romans`, `psalm`, ...);
-- localized book-name aliases for manual search and speech detection;
-- a license/attribution file.
+- API documentation: https://bible.helloao.org/docs/guide/making-requests.html
+- Download formats: https://bible.helloao.org/docs/guide/downloads.html
+- Translation catalogue: https://bible.helloao.org/api/available_translations.json
+- License and attribution: https://bible.helloao.org/docs/guide/a-biblical-model-for-licensing-the-bible.html
 
-The first built-in offline sample is KJV because it is public-domain. The
-Yorùbá, Igbo, Hausa, French, and Spanish entries are intentionally marked as
-pack-required until an approved text file is supplied or licensed. The plugin
-must not scrape or redistribute copyrighted translations.
+The plugin requests only the chapter needed for the staged reference, keeps
+the text out of the executable, and shows the translation's attribution URL in
+the source manifest. The operator still decides when to Preview or Push to
+Program. No detected or manually searched verse is sent live automatically.
 
-## Future pack format
+## Included HelloAO translations
 
-The runtime loader will accept UTF-8 JSON Lines records:
+The initial selector uses BSB and WEB English, Yoruba (yor_bib), Igbo
+(ibo_bib), Hausa (hau_bib), French (fra_lsg), and Spanish (spa_r09).
+Translation IDs and license URLs are kept in helloao-pack-manifest.json so
+they can be updated without changing the reference detector.
 
-```json
-{"book":"john","chapter":3,"verse":16,"reference":"Johanu 3:16","text":"..."}
-```
+## Reference parsing
 
-A separate metadata record identifies the translation, language, version, and
-license. Canonical references remain language-neutral, so `John 3:16`,
-`Johanu 3:16`, and the localized equivalent all stage the same verse.
+Manual search and the listener accept numeric references and natural forms such
+as John 3:16, John chapter three verse sixteen, Johanu 3:16, and
+Orin Dafidi 23:1. Localized book aliases are normalized to the canonical
+book ID used by HelloAO.
 
-## Manual search
+## Verse graphic skins
 
-The Overview tab includes a manual reference search field. It accepts numeric
-references and natural forms such as `John 3:16`, `John chapter three verse
-sixteen`, `Johanu 3:16`, and `Orin Dafidi 23:1`. Search stages the verse
-only; it never changes OBS Program until the operator presses **PUSH TO
-PROGRAM**.
+Five built-in browser-source skins are included:
+
+1. Amber Trails — the gold/blue animated glass style from the VYSTRM reference image.
+2. Midnight Glass — dark glass with cyan edge light.
+3. Blue Pulse — deep blue with a moving cyan pulse.
+4. Royal Burgundy — burgundy and warm gold.
+5. Clean Light — bright readable card for light footage.
+
+Skin and opacity are selected in Bible Settings. Preview creates or updates
+the preview graphic source; Push to Program creates or updates the Program
+graphic source only after the operator presses the button.

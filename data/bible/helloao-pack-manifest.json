@@ -1,0 +1,51 @@
+{
+  "source": "https://bible.helloao.org",
+  "apiBase": "https://bible.helloao.org/api",
+  "docs": "https://bible.helloao.org/docs/guide/making-requests.html",
+  "downloads": "https://bible.helloao.org/docs/guide/downloads.html",
+  "license": "https://bible.helloao.org/docs/guide/a-biblical-model-for-licensing-the-bible.html",
+  "translations": [
+    {
+      "code": "bsb",
+      "apiId": "BSB",
+      "label": "BSB — English",
+      "licenseUrl": "https://berean.bible/"
+    },
+    {
+      "code": "web",
+      "apiId": "ENGWEBP",
+      "label": "WEB — English",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=engwebp"
+    },
+    {
+      "code": "yoruba",
+      "apiId": "yor_bib",
+      "label": "Yorùbá — Bíbélì Mímọ́",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=yor"
+    },
+    {
+      "code": "igbo",
+      "apiId": "ibo_bib",
+      "label": "Igbo — Baịbụlụ Nsọ",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=ibo"
+    },
+    {
+      "code": "hausa",
+      "apiId": "hau_bib",
+      "label": "Hausa — Littafi Mai Tsarki",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=hausa"
+    },
+    {
+      "code": "french",
+      "apiId": "fra_lsg",
+      "label": "Français — Louis Segond",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=fraLSG"
+    },
+    {
+      "code": "spanish",
+      "apiId": "spa_r09",
+      "label": "Español — Reina Valera",
+      "licenseUrl": "https://ebible.org/Scriptures/details.php?id=spaRV1909"
+    }
+  ]
+}

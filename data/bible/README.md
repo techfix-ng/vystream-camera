@@ -41,6 +41,9 @@ Five built-in browser-source skins are included:
 4. Royal Burgundy — burgundy and warm gold.
 5. Clean Light — bright readable card for light footage.
 
-Skin and opacity are selected in Bible Settings. Preview creates or updates
-the preview graphic source; Push to Program creates or updates the Program
-graphic source only after the operator presses the button.
+Skin is also exposed directly in the Overview assistant header so it is always
+visible in the compact OBS dock; opacity remains in Bible Settings. Preview
+creates or updates the preview graphic source; Push to Program creates or
+updates the Program graphic source only after the operator presses the button.
+Clear removes both VYSTRM Bible Preview and VYSTRM Bible Program scene items,
+then resets the staged reference without automatically sending anything live.

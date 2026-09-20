@@ -35,7 +35,7 @@ const BookAlias kBookAliases[] = {
     {"isaiah", "isaiah|isa|isaya|ìsáyà"},
     {"jeremiah", "jeremiah|jer|jeremáyà"},
     {"lamentations", "lamentations|lam|ìkẹ́dùn"},
-    {" ezekiel", "ezekiel|ezk|ẹ́síkíẹ́lì"},
+    {"ezekiel", "ezekiel|ezk|ẹ́síkíẹ́lì"},
     {"daniel", "daniel|dan|dáníẹ́lì"},
     {"hosea", "hosea|hos|hóséà"},
     {"joel", "joel|jol|jówẹ́lì"},

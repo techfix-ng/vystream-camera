@@ -676,7 +676,10 @@ static QString writeBibleGraphicHtml(const QString &reference, const QString &te
 
 extern "C" bool vystrm_clear_bible_from_scenes(void) {
   bool removed = false;
-  const char *names[] = {"VYSTRM Bible — Preview", "VYSTRM Bible — Program"};
+  const char *names[] = {
+    "VYSTRM Bible — Preview", "VYSTRM Bible — Program",
+    "VYSTRM Bible — Preview Graphic", "VYSTRM Bible — Program Graphic"
+  };
   obs_source_t *scenes[] = {
     obs_frontend_get_current_preview_scene(),
     obs_frontend_get_current_scene()
@@ -711,7 +714,16 @@ extern "C" bool vystrm_apply_bible_to_scene(bool preview, const QString &referen
   const bool haveVideoInfo = obs_get_video_info(&videoInfo);
   const int canvasWidth = haveVideoInfo ? int(videoInfo.base_width) : 1920;
   const int canvasHeight = haveVideoInfo ? int(videoInfo.base_height) : 1080;
-  const QString sourceName = preview ? "VYSTRM Bible — Preview" : "VYSTRM Bible — Program";
+  const QString sourceName = preview ? "VYSTRM Bible — Preview Graphic"
+                                            : "VYSTRM Bible — Program Graphic";
+  const QString legacySourceName = preview ? "VYSTRM Bible — Preview"
+                                             : "VYSTRM Bible — Program";
+  // Older installers created a plain text source with the legacy name. Remove
+  // that scene item before creating the styled graphic source so it cannot
+  // remain permanently visible underneath the new skin.
+  if (obs_sceneitem_t *legacyItem =
+          obs_scene_find_source(scene, legacySourceName.toUtf8().constData()))
+    obs_sceneitem_remove(legacyItem);
   const QString url = writeBibleGraphicHtml(reference, text, skin, opacity);
   if (url.isEmpty()) { obs_source_release(sceneSource); return false; }
 

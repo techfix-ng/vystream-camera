@@ -11,7 +11,7 @@ on:
       - feature/existing-scene-source-picker
       - fix/persistent-login-session-v3.0.2
       - fix/obs-scene-shutdown-crash-v3.0.3
-      - fix/session-restore-v3.0.4
+      - fix/vystream-v3.0.5
   workflow_dispatch:
 
 permissions:
@@ -91,11 +91,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "session-restore-v3.0.4"
-          $asset = "$env:GITHUB_WORKSPACE\release\VYSTREAM-OBS-Plugin-Session-Restore-v3.0.4-Setup.exe"
+          $tag = "vystream-v3.0.5"
+          $asset = "$env:GITHUB_WORKSPACE\release\VYSTREAM-OBS-Plugin-v3.0.5-Setup.exe"
           Copy-Item "$env:GITHUB_WORKSPACE\release\VYSTREAM-Auth-TLS-Fix-Setup.exe" $asset -Force
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --prerelease --target "$env:GITHUB_SHA" --title "VYSTREAM Session Restore v3.0.4" --notes "Windows OBS plugin with serialized scene lifecycle, persistent login restoration, and embedded camera setup."
+            gh release create $tag --prerelease --target "$env:GITHUB_SHA" --title "VYSTREAM OBS Plugin v3.0.5" --notes "Windows OBS plugin with persistent login restoration, Bible Live Assistant skins, explicit Preview/Program/Clear controls, and legacy Bible-source cleanup."
           }
           gh release upload $tag $asset --clobber

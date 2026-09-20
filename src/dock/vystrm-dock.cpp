@@ -36,6 +36,7 @@
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QTextStream>
+#include <QRegularExpression>
 #include <string>
 #include "../qr_v4.h"
 #include "../auth/auth-manager.h"
